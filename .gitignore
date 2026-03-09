@@ -1,0 +1,41 @@
+# Build outputs
+/build/
+/out/
+*.obj
+*.o
+*.so
+*.dll
+*.exe
+!watch_stockfish.bat
+!play_proton.bat
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.coverage
+*.egg-info/
+
+# Local engine downloads and third-party checkouts
+/external/
+/openings/data/
+*.zip
+*.zst
+
+# IDE and OS noise
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.user
+
+# Local match artifacts
+*.pgn
+*.ilk
+*.pdb
+*.lib
+*.exp
