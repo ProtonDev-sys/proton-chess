@@ -10,7 +10,7 @@ using Bitboard = std::uint64_t;
 
 enum Color : std::uint8_t { White = 0, Black = 1, NoColor = 2 };
 
-inline Color opposite(Color color) {
+constexpr Color opposite(Color color) {
     return color == White ? Black : White;
 }
 
@@ -42,61 +42,48 @@ enum Piece : std::uint8_t {
 
 constexpr int NoSquare = -1;
 
-inline int file_of(int square) {
-    return square & 7;
-}
+constexpr int file_of(int square) { return square & 7; }
+constexpr int rank_of(int square) { return square >> 3; }
+constexpr Bitboard bit(int square) { return 1ULL << square; }
 
-inline int rank_of(int square) {
-    return square >> 3;
-}
-
-inline Bitboard bit(int square) {
-    return 1ULL << square;
-}
-
-inline Color piece_color(Piece piece) {
-    if (piece >= WhitePawn && piece <= WhiteKing) {
-        return White;
-    }
-    if (piece >= BlackPawn && piece <= BlackKing) {
-        return Black;
-    }
+constexpr Color piece_color(Piece piece) {
+    if (piece >= WhitePawn && piece <= WhiteKing) return White;
+    if (piece >= BlackPawn && piece <= BlackKing) return Black;
     return NoColor;
 }
 
-inline PieceType piece_type(Piece piece) {
+constexpr PieceType piece_type(Piece piece) {
     switch (piece) {
     case WhitePawn:
-    case BlackPawn:
-        return Pawn;
+    case BlackPawn: return Pawn;
     case WhiteKnight:
-    case BlackKnight:
-        return Knight;
+    case BlackKnight: return Knight;
     case WhiteBishop:
-    case BlackBishop:
-        return Bishop;
+    case BlackBishop: return Bishop;
     case WhiteRook:
-    case BlackRook:
-        return Rook;
+    case BlackRook: return Rook;
     case WhiteQueen:
-    case BlackQueen:
-        return Queen;
+    case BlackQueen: return Queen;
     case WhiteKing:
-    case BlackKing:
-        return King;
-    default:
-        return NoPieceType;
+    case BlackKing: return King;
+    default: return NoPieceType;
     }
 }
 
-inline char piece_to_char(Piece piece) {
-    static constexpr std::array<char, 13> table = {
-        '.', 'P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'
-    };
-    return table[static_cast<int>(piece)];
+constexpr Piece make_piece(Color color, PieceType type) {
+    if (type == NoPieceType || color == NoColor) return Empty;
+    return static_cast<Piece>((color == White ? static_cast<int>(WhitePawn)
+                                               : static_cast<int>(BlackPawn))
+                              + static_cast<int>(type));
 }
 
-inline Piece char_to_piece(char c) {
+constexpr char piece_to_char(Piece piece) {
+    constexpr std::array<char, 13> table = {
+        '.', 'P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k'};
+    return table[static_cast<std::size_t>(piece)];
+}
+
+constexpr Piece char_to_piece(char c) {
     switch (c) {
     case 'P': return WhitePawn;
     case 'N': return WhiteKnight;
@@ -115,9 +102,7 @@ inline Piece char_to_piece(char c) {
 }
 
 inline std::string square_to_string(int square) {
-    if (square < 0 || square >= 64) {
-        return "-";
-    }
+    if (square < 0 || square >= 64) return "-";
     std::string out = "a1";
     out[0] = static_cast<char>('a' + file_of(square));
     out[1] = static_cast<char>('1' + rank_of(square));
@@ -125,19 +110,20 @@ inline std::string square_to_string(int square) {
 }
 
 inline int square_from_string(const std::string& text) {
-    if (text.size() != 2 || text[0] < 'a' || text[0] > 'h' || text[1] < '1' || text[1] > '8') {
+    if (text.size() != 2 || text[0] < 'a' || text[0] > 'h' ||
+        text[1] < '1' || text[1] > '8') {
         return NoSquare;
     }
     return (text[1] - '1') * 8 + (text[0] - 'a');
 }
 
-inline int piece_value(PieceType type) {
+constexpr int piece_value(PieceType type) {
     switch (type) {
     case Pawn: return 100;
     case Knight: return 320;
-    case Bishop: return 330;
+    case Bishop: return 335;
     case Rook: return 500;
-    case Queen: return 900;
+    case Queen: return 950;
     case King: return 20000;
     default: return 0;
     }
