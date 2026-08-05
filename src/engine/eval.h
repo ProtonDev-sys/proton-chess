@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -7,11 +9,7 @@
 
 namespace proton {
 
-enum class Backend {
-    Cpu,
-    Gpu,
-    Hybrid
-};
+enum class Backend { Cpu, Gpu, Hybrid };
 
 struct EngineOptions {
     Backend backend = Backend::Cpu;
@@ -20,20 +18,46 @@ struct EngineOptions {
     std::string syzygy_path;
     int deep_eval_budget_ms = 5;
     int deep_eval_batch_size = 16;
+
+    bool use_book = true;
+    std::string book_file = "openings/book_lines.txt";
+    int book_randomness = 0;       // 0 = best-weight line, 100 = full weighted variety.
+    bool human_style = false;
+    int human_skill = 20;          // 0..20. 20 only varies between near-equal moves.
+    int human_max_loss_cp = 12;    // Maximum intentional loss at skill 20.
+    int move_overhead_ms = 25;
+    int contempt_cp = 0;
+    std::uint64_t human_seed = 0;
 };
 
 class CoreEvalNet {
 public:
+    CoreEvalNet();
     [[nodiscard]] int evaluate(const Position& position) const;
+    void clear_cache();
+
+private:
+    struct PawnCacheEntry {
+        std::uint64_t key = 0;
+        int mg = 0;
+        int eg = 0;
+        std::array<std::array<std::uint8_t, 8>, 2> files{};
+        std::array<Bitboard, 2> attacks{};
+        std::array<Bitboard, 2> passed{};
+        bool valid = false;
+    };
+
+    [[nodiscard]] const PawnCacheEntry& pawn_info(const Position& position) const;
+    mutable std::vector<PawnCacheEntry> pawn_cache_{};
 };
 
 class DeepEvalNet {
 public:
     explicit DeepEvalNet(Backend backend = Backend::Cpu);
-
     [[nodiscard]] bool available() const;
     [[nodiscard]] int evaluate(const Position& position) const;
-    [[nodiscard]] std::vector<float> score_moves(const Position& position, const std::vector<Move>& moves) const;
+    [[nodiscard]] std::vector<float> score_moves(const Position& position,
+                                                  const std::vector<Move>& moves) const;
 
 private:
     Backend backend_;
@@ -41,17 +65,25 @@ private:
 
 class Evaluator {
 public:
-    Evaluator() = default;
-
+    Evaluator();
     void set_options(const EngineOptions& options);
     [[nodiscard]] int evaluate(const Position& position, bool deep_hint = false) const;
-    [[nodiscard]] std::vector<float> policy_scores(const Position& position, const std::vector<Move>& moves) const;
+    [[nodiscard]] std::vector<float> policy_scores(const Position& position,
+                                                    const std::vector<Move>& moves) const;
     [[nodiscard]] bool deep_available() const;
+    void clear_cache();
 
 private:
+    struct CacheEntry {
+        std::uint64_t key = 0;
+        int score = 0;
+        bool valid = false;
+    };
+
     EngineOptions options_{};
     CoreEvalNet core_{};
     DeepEvalNet deep_{Backend::Cpu};
+    mutable std::vector<CacheEntry> cache_{};
 };
 
 }  // namespace proton

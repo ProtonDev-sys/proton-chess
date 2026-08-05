@@ -1,28 +1,76 @@
 cmake_minimum_required(VERSION 3.20)
+project(proton_chess VERSION 0.2.0 LANGUAGES CXX)
 
-project(ProtonChess VERSION 0.1.0 LANGUAGES CXX)
+option(PROTON_NATIVE "Tune release builds for the current CPU" OFF)
+option(PROTON_LTO "Enable link-time optimisation when supported" ON)
+option(PROTON_SANITIZERS "Enable address and undefined-behaviour sanitizers" OFF)
+option(PROTON_BUILD_TESTS "Build engine correctness tests" ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(PROTON_CHESS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+find_package(Threads REQUIRED)
 
-file(GLOB_RECURSE PROTON_CHESS_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+add_library(proton_engine
+    src/engine/eval.cpp
+    src/engine/position.cpp
+    src/engine/search.cpp
+    src/engine/see.cpp
+    src/engine/uci.cpp
 )
-
-add_executable(proton_chess ${PROTON_CHESS_SOURCES})
-target_include_directories(proton_chess PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(proton_engine PUBLIC src)
+target_link_libraries(proton_engine PUBLIC Threads::Threads)
 
 if(MSVC)
-    target_compile_options(proton_chess PRIVATE /W4 /permissive-)
-    if(PROTON_CHESS_WARNINGS_AS_ERRORS)
-        target_compile_options(proton_chess PRIVATE /WX)
+    target_compile_options(proton_engine PRIVATE /W4 /permissive- /EHsc)
+    if(PROTON_NATIVE)
+        target_compile_options(proton_engine PRIVATE /arch:AVX2)
     endif()
 else()
-    target_compile_options(proton_chess PRIVATE -Wall -Wextra -Wpedantic)
-    if(PROTON_CHESS_WARNINGS_AS_ERRORS)
-        target_compile_options(proton_chess PRIVATE -Werror)
+    target_compile_options(proton_engine PRIVATE
+        -Wall -Wextra -Wpedantic -Wconversion -Wshadow
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:RelWithDebInfo>:-O3>
+    )
+    if(PROTON_NATIVE)
+        target_compile_options(proton_engine PRIVATE $<$<CONFIG:Release>:-march=native>)
+    endif()
+    if(PROTON_SANITIZERS)
+        # PUBLIC is intentional: proton_engine is a static library, so the
+        # sanitizer runtimes must also be linked by every final executable.
+        target_compile_options(proton_engine PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(proton_engine PUBLIC -fsanitize=address,undefined)
+    endif()
+endif()
+
+if(PROTON_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT PROTON_IPO_SUPPORTED OUTPUT PROTON_IPO_ERROR)
+    if(PROTON_IPO_SUPPORTED)
+        set_property(TARGET proton_engine PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        set_property(TARGET proton_engine PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+    endif()
+endif()
+
+add_executable(proton_chess src/main.cpp)
+target_link_libraries(proton_chess PRIVATE proton_engine)
+if(PROTON_LTO AND PROTON_IPO_SUPPORTED)
+    set_property(TARGET proton_chess PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set_property(TARGET proton_chess PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+endif()
+
+if(PROTON_BUILD_TESTS)
+    enable_testing()
+    add_executable(proton-tests tests/test_engine.cpp)
+    target_link_libraries(proton-tests PRIVATE proton_engine)
+    add_test(NAME proton-tests COMMAND proton-tests)
+
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME proton-uci-smoke
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/uci_smoke.py
+                         $<TARGET_FILE:proton_chess>)
+        set_tests_properties(proton-uci-smoke PROPERTIES TIMEOUT 20)
     endif()
 endif()

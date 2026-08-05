@@ -1,115 +1,106 @@
 # Proton Chess
 
-Proton Chess is an experimental open-source chess engine written in C++20 with supporting Python tooling for testing, data generation, and future neural-evaluation work. The current codebase is a classical search engine with a generated opening-book workflow and a small training scaffold for later NNUE-style and deep-eval integration.
+Proton Chess is a single-threaded C++20 UCI chess engine with a classical evaluator and a selective alpha-beta search. This build focuses on legal correctness, practical playing strength, stable time-control behaviour, and optional human-like root move selection.
 
-## What is in this repo
-
-- A UCI engine with legal move generation, perft support, iterative deepening alpha-beta, quiescence, aspiration windows, a transposition table, null-move pruning, and LMR.
-- A baseline evaluator plus GPU-ready deep-eval interfaces.
-- Match, watcher, and play-against-engine scripts.
-- A generated opening-book pipeline built from official Lichess broadcast PGNs.
-- Training schema and export stubs for future neural models.
-
-## Current strength
-
-This is still an early engine. It is competitive against weaker engines and lower strength-limited Stockfish settings, but it is not yet close to unrestricted top engines.
-
-Current verified checkpoints:
-
-- `python tools/check_perft.py build\proton_chess.exe`
-- `python tools/crosscheck_movegen.py build\proton_chess.exe --count 40 --plies 10 --seed 17`
-- Sunfish, `8` games, `0.2s/move`, plain starts: `3 wins / 1 loss / 4 draws`
-- Stockfish 18 with `UCI_Elo=1800`, `8` games, `0.2s/move`: `5 wins / 1 loss / 2 draws`
-- Stockfish 18 with `UCI_Elo=1900`, `8` games, `0.2s/move`, `mini_suite`: `5 wins / 2 losses / 1 draw`
-- Stockfish 18 with `UCI_Elo=2000-2100`: competitive in some short samples, but still unstable across reruns
-- Stockfish 18 unrestricted and Koivisto 9.0: still losing
+It is a native Proton implementation, not a Stockfish fork. It does not contain Stockfish source code or an NNUE network.
 
 ## Build
 
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
+A portable release build:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPROTON_NATIVE=OFF
+cmake --build build --config Release -j
+ctest --test-dir build -C Release --output-on-failure
 ```
 
-## Run
+A build optimized for the current CPU:
 
-```powershell
-.\build\proton_chess.exe
+```bash
+cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DPROTON_NATIVE=ON
+cmake --build build-native --config Release -j
 ```
 
-Supported engine commands:
+Do not distribute a `PROTON_NATIVE=ON` binary to machines that may lack the same CPU instruction set.
 
-- `uci`
-- `isready`
-- `ucinewgame`
-- `position startpos moves ...`
-- `position fen <fen> moves ...`
-- `go depth <n>`
-- `go movetime <ms>`
-- `go wtime <ms> btime <ms> winc <ms> binc <ms>`
-- `perft <depth>`
-- `d`
+AddressSanitizer and UndefinedBehaviorSanitizer validation on GCC or Clang:
 
-## Opening book generation
-
-The engine can load weighted UCI opening lines from `openings/book_lines.txt`. To regenerate that file from official Lichess broadcast archives:
-
-```powershell
-python -m pip install zstandard
-python tools\build_opening_book.py `
-  --download-url https://database.lichess.org/broadcast/lichess_db_broadcast_2026-02.pgn.zst `
-  --download-url https://database.lichess.org/broadcast/lichess_db_broadcast_2026-01.pgn.zst `
-  --download-url https://database.lichess.org/broadcast/lichess_db_broadcast_2025-12.pgn.zst `
-  --max-games 30000 `
-  --max-ply 18 `
-  --root-branching 16 `
-  --branching 6 `
-  --min-count 4 `
-  --min-ratio 0.02
+```bash
+cmake -S . -B build-sanitize \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DPROTON_SANITIZERS=ON \
+  -DPROTON_LTO=OFF
+cmake --build build-sanitize -j
+ctest --test-dir build-sanitize --output-on-failure
 ```
 
-Downloaded `.zst` source files are cached under `openings/data/` and ignored by Git.
+The executable is `proton_chess` (`proton_chess.exe` on Windows). The packaged Linux build is under `bin/linux-x86_64/`.
 
-## Tooling
+## UCI configuration
 
-Syntax check:
+Maximum native strength:
 
-```powershell
-python -m compileall python tools
+```text
+setoption name Hash value 256
+setoption name UseBook value true
+setoption name BookRandomness value 0
+setoption name HumanStyle value false
+setoption name Skill Level value 20
 ```
 
-Run a small match against Sunfish:
+Strong human-like play:
 
-```powershell
-python tools\run_match.py build\proton_chess.exe tools\sunfish_uci.cmd --games 8 --seconds 0.2
+```text
+setoption name Hash value 256
+setoption name UseBook value true
+setoption name BookRandomness value 10
+setoption name HumanStyle value true
+setoption name HumanSkill value 20
+setoption name HumanMaxLossCp value 8
+setoption name HumanSeed value 0
 ```
 
-Run against strength-limited Stockfish:
+Human mode does not add noise inside the search. It verifies plausible root alternatives, rejects moves outside the configured loss band, strongly favours the best move at high skill, and does not randomize away a proven mate. `HumanSeed=0` uses a nondeterministic seed; a non-zero value makes root choices reproducible.
 
-```powershell
-python tools\run_match.py build\proton_chess.exe external\bin\stockfish18\stockfish\stockfish-windows-x86-64.exe --games 8 --seconds 0.2 --opponent-option UCI_LimitStrength=true --opponent-option UCI_Elo=1800
+`UCI_Elo` and `UCI_LimitStrength` map to Proton's skill controls for GUI compatibility. They have not been independently calibrated to FIDE, online, or computer-engine ratings and should not be treated as measured Elo.
+
+The weighted text opening book is used for timed games only. Fixed-depth, node-limited, `infinite`, and `searchmoves` searches analyze the position instead of returning a book move.
+
+## Engine features
+
+The board implementation uses incremental Zobrist and pawn keys, piece and occupancy bitboards, canonical en-passant hashing, precomputed attack rays, reusable move buffers, and complete make/unmake state restoration.
+
+The evaluator tapers middlegame and endgame scores and includes material, piece-square placement, mobility, pawn structure, passed pawns, king safety, bishop pair, outposts, rook activity, and low-material conversion terms. Pawn and full-position evaluation caches avoid repeated work.
+
+The search includes iterative deepening, aspiration windows, principal-variation search, clustered transposition tables, mate-score normalization, transposition reuse in quiescence, static exchange evaluation, adaptive null-move pruning with verification, mate-distance pruning, razoring, reverse futility pruning, late-move pruning, logarithmic late-move reductions, conservative ProbCut, killer/history/counter-move ordering, capture history, continuation history, correction history, and root policy ordering.
+
+UCI search runs asynchronously and supports `stop`, `ponder`/`ponderhit`, clocks and increments, `movetime`, node limits, `infinite`, `mate`, and `searchmoves`. Interrupted iterative-deepening searches return the move from the last fully completed iteration rather than a partially overwritten root result.
+
+## Validation
+
+The test suite covers six standard perft positions, randomized make/unmake and hash reconstruction, pawn keys, castling, en passant, promotions, repetition and null moves, dead-material cases, attack tables, static exchange evaluation, rule-50 mate precedence, quiescence stalemate, human-mode mate preservation, restricted root searches, malformed UCI input, asynchronous stopping, and ponder handling.
+
+A deterministic search benchmark is available:
+
+```bash
+python3 tools/benchmark_uci.py build/proton_chess --depth 11 --hash 64
 ```
 
-Watch a live match:
+A paired-opening match can give a rough, time-control-specific Elo estimate
+against Stockfish's limited-strength settings (requires `python-chess`):
 
-```powershell
-.\watch_stockfish.bat
+```bash
+python3 tools/estimate_elo.py build/proton_chess /path/to/stockfish \
+  --opponent-elo 2200 --games 40 --move-time 0.08
 ```
 
-Play against Proton locally:
+This is an engine-match estimate, not a FIDE or online-player rating. The tool
+plays every sampled opening with colours reversed and reports a 95% interval.
 
-```powershell
-python tools\play_against_engine.py build\proton_chess.exe --human-color white --seconds 0.2 --pgn .\out\human_vs_proton.pgn
-```
+## Current limits
 
-## Repo layout
-
-- `src/`: engine source
-- `python/`: training and export scaffolding
-- `tools/`: perft, movegen cross-check, and match runners
-- `openings/`: opening suite and generated book output
-- `configs/`: evaluation harness configs
+Proton remains a handcrafted, single-threaded engine. It has no NNUE evaluator, Lazy-SMP search, Syzygy tablebase probing, direct legal move generator, or large-scale Fishtest-style SPRT tuning. These are substantial gaps relative to unrestricted top engines.
 
 ## License
 
-This repository is licensed under the MIT License. See `LICENSE`.
+MIT. See `LICENSE`.
