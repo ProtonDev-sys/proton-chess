@@ -11,6 +11,34 @@ namespace proton {
 
 enum class Backend { Cpu, Gpu, Hybrid };
 
+inline constexpr int UciEloMin = 800;
+inline constexpr int UciEloDefault = 2800;
+inline constexpr int UciEloLegacyTop = 2800;
+inline constexpr int UciEloMax = 3000;
+
+struct UciEloProfile {
+    int skill = 20;
+    int max_loss_cp = 0;
+};
+
+[[nodiscard]] constexpr UciEloProfile uci_elo_profile(int elo) {
+    const int bounded = elo < UciEloMin ? UciEloMin :
+                        (elo > UciEloMax ? UciEloMax : elo);
+    if (bounded <= UciEloLegacyTop) {
+        const int loss = (UciEloLegacyTop - bounded) / 8;
+        return UciEloProfile{
+            (bounded - UciEloMin) / 100,
+            loss < 8 ? 8 : (loss > 250 ? 250 : loss),
+        };
+    }
+    const int high_elo_span = UciEloMax - UciEloLegacyTop;
+    const int scaled_loss = (UciEloMax - bounded) * 8;
+    return UciEloProfile{
+        20,
+        (scaled_loss + high_elo_span - 1) / high_elo_span,
+    };
+}
+
 struct EngineOptions {
     Backend backend = Backend::Cpu;
     int threads = 1;
@@ -23,7 +51,7 @@ struct EngineOptions {
     std::string book_file = "openings/book_lines.txt";
     int book_randomness = 0;       // 0 = best-weight line, 100 = full weighted variety.
     bool uci_limit_strength = false;
-    int uci_elo = 2800;
+    int uci_elo = UciEloDefault;
     bool human_style = false;
     int human_skill = 20;          // 0..20. 20 only varies between near-equal moves.
     int human_max_loss_cp = 12;    // Maximum intentional loss at skill 20.

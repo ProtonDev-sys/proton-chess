@@ -289,6 +289,46 @@ void test_static_exchange() {
 }
 
 void test_search_tactics() {
+    for (int elo = proton::UciEloMin; elo <= proton::UciEloLegacyTop; ++elo) {
+        const proton::UciEloProfile profile = proton::uci_elo_profile(elo);
+        const int legacy_loss = std::clamp(
+            (proton::UciEloLegacyTop - elo) / 8, 8, 250);
+        expect(profile.skill == std::clamp((elo - proton::UciEloMin) / 100, 0, 20) &&
+                   profile.max_loss_cp == legacy_loss,
+               "Elo profile preserves the legacy mapping at " + std::to_string(elo));
+    }
+    int previous_high_elo_loss = 8;
+    for (int elo = proton::UciEloLegacyTop + 1; elo <= proton::UciEloMax; ++elo) {
+        const proton::UciEloProfile profile = proton::uci_elo_profile(elo);
+        expect(profile.skill == 20 && profile.max_loss_cp >= 0 &&
+                   profile.max_loss_cp <= previous_high_elo_loss,
+               "high-Elo profile is monotonic at " + std::to_string(elo));
+        previous_high_elo_loss = profile.max_loss_cp;
+    }
+    const proton::UciEloProfile elo_800 = proton::uci_elo_profile(800);
+    const proton::UciEloProfile elo_2800 = proton::uci_elo_profile(2800);
+    const proton::UciEloProfile elo_2900 = proton::uci_elo_profile(2900);
+    const proton::UciEloProfile elo_2999 = proton::uci_elo_profile(2999);
+    const proton::UciEloProfile elo_3000 = proton::uci_elo_profile(3000);
+    expect(elo_800.skill == 0 && elo_800.max_loss_cp == 250,
+           "Elo 800 retains the legacy limiter profile");
+    expect(elo_2800.skill == 20 && elo_2800.max_loss_cp == 8,
+           "Elo 2800 retains the legacy limiter profile");
+    expect(elo_2900.skill == 20 && elo_2900.max_loss_cp == 4,
+           "Elo 2900 tapers the intentional loss allowance");
+    expect(elo_2999.skill == 20 && elo_2999.max_loss_cp == 1,
+           "only Elo 3000 reaches the zero-loss profile");
+    expect(elo_3000.skill == 20 && elo_3000.max_loss_cp == 0,
+           "Elo 3000 permits only equally scored alternatives");
+    expect(proton::uci_elo_profile(proton::UciEloMin - 1).skill == elo_800.skill &&
+               proton::uci_elo_profile(proton::UciEloMin - 1).max_loss_cp ==
+                   elo_800.max_loss_cp,
+           "Elo profile clamps below the advertised minimum");
+    expect(proton::uci_elo_profile(proton::UciEloMax + 1).skill == elo_3000.skill &&
+               proton::uci_elo_profile(proton::UciEloMax + 1).max_loss_cp ==
+                   elo_3000.max_loss_cp,
+           "Elo profile clamps above the advertised maximum");
+
     proton::EngineOptions options;
     options.use_book = false;
     options.hash_mb = 16;
@@ -385,6 +425,49 @@ void test_search_tactics() {
                    std::to_string(seed) + ", move " + limited_result.best.to_uci() + ")");
     }
     expect(selected_alternative, "fixed human seeds exercise a non-best in-band move");
+
+    const std::string zero_loss_fen =
+        "rnb1kb1r/ppp1pppp/5q2/8/8/3PBQ2/PPP2KPP/RN3B1R w kq - 2 9";
+    proton::SearchLimits zero_loss_limits;
+    zero_loss_limits.depth = 3;
+    proton::Evaluator zero_loss_full_evaluator;
+    zero_loss_full_evaluator.set_options(full_options);
+    auto zero_loss_full_search =
+        std::make_unique<proton::Search>(zero_loss_full_evaluator, full_options);
+    proton::Position zero_loss_full_position;
+    expect(zero_loss_full_position.set_fen(zero_loss_fen), "zero-loss FEN parses");
+    const proton::SearchResult zero_loss_full_result =
+        zero_loss_full_search->think(zero_loss_full_position, zero_loss_limits);
+
+    proton::EngineOptions elo_3000_options = full_options;
+    elo_3000_options.uci_limit_strength = true;
+    elo_3000_options.uci_elo = 3000;
+    elo_3000_options.human_seed = 2;
+    proton::Evaluator elo_3000_evaluator;
+    elo_3000_evaluator.set_options(elo_3000_options);
+    auto elo_3000_search =
+        std::make_unique<proton::Search>(elo_3000_evaluator, elo_3000_options);
+    proton::Position elo_3000_position;
+    expect(elo_3000_position.set_fen(zero_loss_fen), "Elo 3000 FEN parses");
+    const proton::SearchResult elo_3000_result =
+        elo_3000_search->think(elo_3000_position, zero_loss_limits);
+    expect(elo_3000_result.best != zero_loss_full_result.best,
+           "Elo 3000 regression exercises a real alternative");
+
+    proton::Evaluator zero_loss_verify_evaluator;
+    zero_loss_verify_evaluator.set_options(full_options);
+    auto zero_loss_verify_search =
+        std::make_unique<proton::Search>(zero_loss_verify_evaluator, full_options);
+    proton::Position zero_loss_verify_position;
+    expect(zero_loss_verify_position.set_fen(zero_loss_fen),
+           "zero-loss verification FEN parses");
+    proton::SearchLimits zero_loss_verify_limits = zero_loss_limits;
+    zero_loss_verify_limits.search_moves_specified = true;
+    zero_loss_verify_limits.search_moves.push_back(elo_3000_result.best);
+    const proton::SearchResult zero_loss_verify_result =
+        zero_loss_verify_search->think(zero_loss_verify_position, zero_loss_verify_limits);
+    expect(zero_loss_verify_result.score_cp >= zero_loss_full_result.score_cp,
+           "Elo 3000 confirms an alternative is independently equal or better");
 
     proton::EngineOptions interrupted_options = full_options;
     interrupted_options.uci_limit_strength = true;

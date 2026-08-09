@@ -221,7 +221,7 @@ void UciLoop::handle_setoption(const std::string& line) {
     } else if (key == "uci_limitstrength") {
         options_.uci_limit_strength = lower_value == "true" || lower_value == "1";
     } else if (key == "uci_elo" && parse_int(value, number)) {
-        options_.uci_elo = std::clamp(number, 800, 2800);
+        options_.uci_elo = std::clamp(number, UciEloMin, UciEloMax);
     } else if (key == "skill level" && parse_int(value, number)) {
         options_.human_skill = std::clamp(number, 0, 20);
     } else if (key == "humanstyle") {
@@ -323,7 +323,9 @@ void UciLoop::handle_command(const std::string& line, bool& quit) {
         print_line("option name BookFile type string default openings/book_lines.txt");
         print_line("option name BookRandomness type spin default 0 min 0 max 100");
         print_line("option name UCI_LimitStrength type check default false");
-        print_line("option name UCI_Elo type spin default 2800 min 800 max 2800");
+        print_line("option name UCI_Elo type spin default " + std::to_string(UciEloDefault) +
+                   " min " + std::to_string(UciEloMin) +
+                   " max " + std::to_string(UciEloMax));
         print_line("option name Skill Level type spin default 20 min 0 max 20");
         print_line("option name HumanStyle type check default false");
         print_line("option name HumanSkill type spin default 20 min 0 max 20");

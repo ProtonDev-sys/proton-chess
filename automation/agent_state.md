@@ -2,13 +2,27 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T16:08:29+01:00`
+- Last run: `2026-08-09T17:13:14+01:00`
 - Status: `passed`
-- Change kept: order-stable limiter options and proof-checked human move selection
-- Active branch: `agent/human-limiter-correctness`
-- Base: `origin/main` at `4f21a43`
+- Change kept: honest 3000-Elo control surface and deterministic calibration setup
+- Active branch: `agent/elo-3000-tooling`
+- Base: `origin/main` at `554d271`
 
 ## Latest evidence
+
+- `UCI_Elo` now advertises `default 2800 min 800 max 3000`. Every integer setting through 2800 retains the old skill/loss profile. From 2801 to 3000, skill remains 20 and the base loss allowance decreases monotonically from 8 cp to 0 cp; only 3000 reaches zero.
+- The Elo-3000 regression is non-vacuous. On `rnb1kb1r/ppp1pppp/5q2/8/8/3PBQ2/PPP2KPP/RN3B1R w kq - 2 9` at depth 3, seed 2 chooses `f3f6` instead of root best `b1c3`; a fresh restricted search scores the alternative `-55` against the root score `-84`.
+- The match runner accepts `--proton-elo`, derives a distinct deterministic `HumanSeed` from the protocol seed, target, effective opponent, pair and color, and enables `UCI_LimitStrength` last. Full 64-bit seeds are recorded as decimal strings.
+- Stockfish's advertised Elo range is inspected before play. A requested 1200 calibration opponent is honestly recorded as requested 1200, effective 1320; values above Stockfish's maximum and duplicate effective levels are rejected.
+- Proton's requested target is rejected rather than clamped when it falls outside the engine's advertised 800..3000 range.
+- Full-strength certification keeps its exact Proton option set and never adds `--proton-elo`. The result checker accepts legacy schema-2 reports but rejects contradictory target, seed, requested/effective Elo and range metadata when those fields are present.
+- Focused tests pass: 28/28 match-runner tests and 16/16 certification-checker tests. Native profile tests cover every Elo through 2800, monotonicity through 3000, endpoint clamping, and a confirmed zero-loss alternative.
+- Full validation passes: 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- A real two-game configuration smoke ran Proton target 1200 against effective Stockfish 1320 at 0.02 seconds per move. It exercised both colors, exact per-game seed recording and requested/effective labels. Its 2/2 result is not calibration evidence.
+- The Windows executable SHA-256 is `d90878c62b8c83b4d5610189428eef49e3e94eae2de0d3cfc4e99feef7d5eca9`; the runner SHA-256 is `df6d62cf76bc3588b77177555c6ddd1234008aff49a5a1976308476bea9e26ee`. The certification manifest pins both.
+- This run establishes controls and reproducibility. It does not claim calibrated Elo or increased full strength.
+
+## Previous run: human limiter correctness
 
 - `UCI_LimitStrength` and `UCI_Elo` now have independent state. Setting either no longer overwrites custom human-style options; `HumanSkill` and `Skill Level` no longer toggle a separate Boolean.
 - Replaying every advertised UCI default used to change startpos depth-4 play from `b1c3` to `g1f3`. Fresh defaults, replayed defaults, a `HumanSkill` 0-to-20 round trip and disabled `UCI_Elo=800` now all return `b1c3` with seed 27.

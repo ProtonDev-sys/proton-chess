@@ -26,11 +26,11 @@ struct HumanSettings {
 
 HumanSettings resolved_human_settings(const EngineOptions& options) {
     if (options.uci_limit_strength) {
-        const int elo = std::clamp(options.uci_elo, 800, 2800);
+        const UciEloProfile profile = uci_elo_profile(options.uci_elo);
         return HumanSettings{
             true,
-            std::clamp((elo - 800) / 100, 0, 20),
-            std::clamp((2800 - elo) / 8, 8, 250),
+            profile.skill,
+            profile.max_loss_cp,
         };
     }
     return HumanSettings{

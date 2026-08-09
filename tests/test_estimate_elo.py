@@ -289,6 +289,98 @@ class EstimateEloTests(unittest.TestCase):
         first[0][1].moves.append("e7e5")
         self.assertEqual(len(openings[first[0][0]].moves), 1)
 
+    def test_proton_seed_derivation_is_stable_and_domain_separated(self) -> None:
+        base = estimate_elo.derive_proton_seed(17, 1200, 1320, 1, "white")
+        self.assertEqual(
+            base,
+            estimate_elo.derive_proton_seed(17, 1200, 1320, 1, "white"),
+        )
+        variants = {
+            base,
+            estimate_elo.derive_proton_seed(18, 1200, 1320, 1, "white"),
+            estimate_elo.derive_proton_seed(17, 1800, 1320, 1, "white"),
+            estimate_elo.derive_proton_seed(17, 1200, 1800, 1, "white"),
+            estimate_elo.derive_proton_seed(17, 1200, 1320, 2, "white"),
+            estimate_elo.derive_proton_seed(17, 1200, 1320, 1, "black"),
+        }
+        self.assertEqual(len(variants), 6)
+        self.assertTrue(all(0 < seed < 2**64 for seed in variants))
+
+    def test_stockfish_range_resolution_records_requested_and_effective_elo(self) -> None:
+        levels = estimate_elo.resolve_opponent_levels(
+            [1200, 3000], estimate_elo.UciEloRange(1320, 3190, 1320)
+        )
+        self.assertEqual(
+            levels,
+            [
+                estimate_elo.OpponentLevel(1200, 1320),
+                estimate_elo.OpponentLevel(3000, 3000),
+            ],
+        )
+        expected_score = 1.0 / (1.0 + 10.0 ** ((1320 - 1200) / 400.0))
+        self.assertAlmostEqual(estimate_elo.logistic_elo(1320, expected_score), 1200.0)
+        with self.assertRaisesRegex(ValueError, "advertised maximum"):
+            estimate_elo.resolve_opponent_levels(
+                [3200], estimate_elo.UciEloRange(1320, 3190, 1320)
+            )
+        with self.assertRaisesRegex(ValueError, "resolve to Elo 1320"):
+            estimate_elo.resolve_opponent_levels(
+                [1200, 1320], estimate_elo.UciEloRange(1320, 3190, 1320)
+            )
+
+    def test_engine_configuration_enables_limiters_last(self) -> None:
+        class RecordingEngine:
+            def __init__(self) -> None:
+                self.configurations: list[dict[str, object]] = []
+
+            def configure(self, options: dict[str, object]) -> None:
+                self.configurations.append(options)
+
+        proton = RecordingEngine()
+        stockfish = RecordingEngine()
+        estimate_elo.configure_engines(
+            proton, stockfish, 1320, 64, proton_elo=1200, proton_seed=99
+        )
+        self.assertEqual(
+            list(proton.configurations[0]),
+            ["Hash", "UseBook", "HumanStyle", "UCI_Elo", "HumanSeed",
+             "UCI_LimitStrength"],
+        )
+        self.assertEqual(proton.configurations[0]["HumanSeed"], "99")
+        self.assertEqual(
+            list(stockfish.configurations[0]),
+            ["Hash", "Threads", "UCI_Elo", "UCI_LimitStrength"],
+        )
+        full_proton = RecordingEngine()
+        full_stockfish = RecordingEngine()
+        estimate_elo.configure_engines(full_proton, full_stockfish, 3000, 64)
+        self.assertEqual(
+            full_proton.configurations,
+            [{"Hash": 64, "UseBook": False, "HumanStyle": False}],
+        )
+        with self.assertRaisesRegex(ValueError, "requires a deterministic seed"):
+            estimate_elo.configure_engines(
+                RecordingEngine(), RecordingEngine(), 1320, 64, proton_elo=1200
+            )
+        with self.assertRaisesRegex(ValueError, "requires --proton-elo"):
+            estimate_elo.configure_engines(
+                RecordingEngine(), RecordingEngine(), 1320, 64, proton_seed=99
+            )
+        self.assertEqual(
+            estimate_elo.proton_options(64, None),
+            {"Hash": 64, "UseBook": False, "HumanStyle": False},
+        )
+        self.assertEqual(
+            estimate_elo.proton_options(64, 1200),
+            {
+                "Hash": 64,
+                "UseBook": False,
+                "HumanStyle": False,
+                "UCI_Elo": 1200,
+                "UCI_LimitStrength": True,
+            },
+        )
+
     def test_opening_loader_accepts_fen_and_legacy_move_lines(self) -> None:
         fen = "rnbqkbnr/ppp1pppp/8/3p4/8/2N5/PPPPPPPP/R1BQKBNR w KQkq - 0 2"
         with tempfile.TemporaryDirectory() as temporary:
@@ -419,6 +511,54 @@ class EstimateEloTests(unittest.TestCase):
         self.assertEqual(checkpoints[1].complete_pair_score, 0.75)
         self.assertEqual(result, checkpoints[-1])
 
+    def test_run_level_records_exact_per_game_proton_seeds(self) -> None:
+        outcomes = [
+            estimate_elo.GameOutcome(0.5, "test", 1, ["e2e4"], None, None),
+            estimate_elo.GameOutcome(0.5, "test", 1, ["e2e4"], None, None),
+        ]
+        args = Namespace(
+            games=2,
+            seed=17,
+            hash=16,
+            max_plies=40,
+            proton_elo=1200,
+        )
+        configure = mock.Mock()
+        with (
+            mock.patch.object(
+                estimate_elo.chess.engine.SimpleEngine,
+                "popen_uci",
+                return_value=object(),
+            ),
+            mock.patch.object(estimate_elo, "configure_engines", configure),
+            mock.patch.object(estimate_elo, "prepare_engine_for_game"),
+            mock.patch.object(estimate_elo, "safe_quit"),
+            mock.patch.object(estimate_elo, "play_game", side_effect=outcomes),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = estimate_elo.run_level(
+                Path("proton"),
+                Path("stockfish"),
+                1320,
+                [estimate_elo.OpeningPosition(chess.STARTING_FEN, ["e2e4"])],
+                args,
+                estimate_elo.TimeControl(0.01, None, 0.0, 1.0),
+                requested_opponent_elo=1200,
+            )
+        expected = [
+            estimate_elo.derive_proton_seed(17, 1200, 1320, 1, color)
+            for color in ("white", "black")
+        ]
+        self.assertEqual(
+            [record.proton_seed for record in result.records],
+            [str(seed) for seed in expected],
+        )
+        self.assertEqual(result.opponent_elo, 1320)
+        self.assertEqual(result.opponent_elo_requested, 1200)
+        self.assertEqual(
+            [call.args[-1] for call in configure.call_args_list], expected
+        )
+
     def test_main_checkpoints_running_then_complete_across_levels(self) -> None:
         snapshots: list[dict[str, object]] = []
         events: list[str] = []
@@ -443,6 +583,7 @@ class EstimateEloTests(unittest.TestCase):
                 proton=proton,
                 stockfish=stockfish,
                 opponent_elo=[2400, 3000],
+                proton_elo=None,
                 games=2,
                 move_time=0.01,
                 base_seconds=None,
@@ -463,8 +604,11 @@ class EstimateEloTests(unittest.TestCase):
                 parsed_args: Namespace,
                 time_control: estimate_elo.TimeControl,
                 checkpoint: object = None,
+                *,
+                requested_opponent_elo: int | None = None,
             ) -> estimate_elo.MatchResult:
                 del proton_path, stockfish_path, opening_lines, parsed_args, time_control
+                self.assertEqual(requested_opponent_elo, rating)
                 first = estimate_elo.summarize_level(
                     rating, [self.record(1, "white", 0.5)])
                 complete = estimate_elo.summarize_level(
@@ -480,6 +624,11 @@ class EstimateEloTests(unittest.TestCase):
             with (
                 mock.patch.object(estimate_elo, "parse_args", return_value=args),
                 mock.patch.object(estimate_elo, "identify_engine", return_value=artifact),
+                mock.patch.object(
+                    estimate_elo,
+                    "inspect_uci_elo_range",
+                    return_value=estimate_elo.UciEloRange(1320, 3190, 1320),
+                ),
                 mock.patch.object(estimate_elo, "run_level", side_effect=fake_level),
                 mock.patch.object(estimate_elo, "write_json_atomic", side_effect=capture),
                 mock.patch("builtins.print", side_effect=lambda *args, **kwargs: events.append("print")),
@@ -494,6 +643,136 @@ class EstimateEloTests(unittest.TestCase):
         self.assertEqual(events[-2:], ["write:complete", "print"])
         self.assertEqual(len(final["results"]), 2)
         self.assertEqual(final["status"], "complete")
+
+    def test_main_distinguishes_requested_and_effective_calibration_elo(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proton = root / "proton.exe"
+            stockfish = root / "stockfish.exe"
+            openings = root / "openings.txt"
+            report_path = root / "match.json"
+            proton.write_bytes(b"proton")
+            stockfish.write_bytes(b"stockfish")
+            openings.write_text("e2e4 e7e5\n", encoding="utf-8")
+            args = Namespace(
+                proton=proton,
+                stockfish=stockfish,
+                opponent_elo=None,
+                proton_elo=1200,
+                games=2,
+                move_time=0.01,
+                base_seconds=None,
+                increment=0.0,
+                watchdog_grace=1.0,
+                max_plies=40,
+                hash=16,
+                seed=17,
+                openings=openings,
+                json_path=report_path,
+            )
+
+            def fake_level(
+                proton_path: Path,
+                stockfish_path: Path,
+                rating: int,
+                opening_lines: list[estimate_elo.OpeningPosition],
+                parsed_args: Namespace,
+                time_control: estimate_elo.TimeControl,
+                checkpoint: object = None,
+                *,
+                requested_opponent_elo: int | None = None,
+            ) -> estimate_elo.MatchResult:
+                del proton_path, stockfish_path, opening_lines, time_control, checkpoint
+                self.assertEqual(parsed_args.proton_elo, 1200)
+                self.assertEqual((requested_opponent_elo, rating), (1200, 1320))
+                return estimate_elo.summarize_level(
+                    rating,
+                    [self.record(1, "white", 0.5), self.record(1, "black", 0.5)],
+                    opponent_elo_requested=requested_opponent_elo,
+                )
+
+            artifact = estimate_elo.EngineArtifact("test", "test", "test", "0" * 64)
+            with (
+                mock.patch.object(estimate_elo, "parse_args", return_value=args),
+                mock.patch.object(estimate_elo, "identify_engine", return_value=artifact),
+                mock.patch.object(
+                    estimate_elo,
+                    "inspect_uci_elo_range",
+                    side_effect=[
+                        estimate_elo.UciEloRange(1320, 3190, 1320),
+                        estimate_elo.UciEloRange(800, 3000, 2800),
+                    ],
+                ),
+                mock.patch.object(estimate_elo, "run_level", side_effect=fake_level),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(estimate_elo.main(), 0)
+
+            final = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(final["proton_target_elo"], 1200)
+        self.assertEqual(final["proton_seed_derivation"], estimate_elo.PROTON_SEED_DERIVATION)
+        self.assertEqual(final["stockfish_requested_elo"], [1200])
+        self.assertEqual(final["stockfish_effective_elo"], [1320])
+        self.assertEqual(final["stockfish_options"]["UCI_Elo"], [1320])
+        self.assertEqual(final["results"][0]["opponent_elo"], 1320)
+        self.assertEqual(final["results"][0]["opponent_elo_requested"], 1200)
+        self.assertEqual(
+            final["proton_options"],
+            {
+                "Hash": 16,
+                "UseBook": False,
+                "HumanStyle": False,
+                "UCI_Elo": 1200,
+                "UCI_LimitStrength": True,
+            },
+        )
+
+    def test_main_rejects_proton_elo_outside_the_advertised_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proton = root / "proton.exe"
+            stockfish = root / "stockfish.exe"
+            openings = root / "openings.txt"
+            proton.write_bytes(b"proton")
+            stockfish.write_bytes(b"stockfish")
+            openings.write_text("e2e4 e7e5\n", encoding="utf-8")
+
+            for target in (799, 3001):
+                with self.subTest(target=target):
+                    args = Namespace(
+                        proton=proton,
+                        stockfish=stockfish,
+                        opponent_elo=[3000],
+                        proton_elo=target,
+                        games=2,
+                        move_time=0.01,
+                        base_seconds=None,
+                        increment=0.0,
+                        watchdog_grace=1.0,
+                        max_plies=40,
+                        hash=16,
+                        seed=17,
+                        openings=openings,
+                        json_path=None,
+                    )
+                    run_level = mock.Mock()
+                    with (
+                        mock.patch.object(estimate_elo, "parse_args", return_value=args),
+                        mock.patch.object(
+                            estimate_elo,
+                            "inspect_uci_elo_range",
+                            side_effect=[
+                                estimate_elo.UciEloRange(1320, 3190, 1320),
+                                estimate_elo.UciEloRange(800, 3000, 2800),
+                            ],
+                        ),
+                        mock.patch.object(estimate_elo, "run_level", run_level),
+                    ):
+                        with self.assertRaisesRegex(
+                            ValueError, "outside its advertised range"
+                        ):
+                            estimate_elo.main()
+                    run_level.assert_not_called()
 
     def test_json_checkpoint_replaces_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

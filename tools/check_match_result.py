@@ -177,6 +177,10 @@ def parse_records(
         if not isinstance(record.termination, str) or not isinstance(record.plies, int):
             errors.append(f"Stockfish Elo {rating} record {index} has invalid outcome fields")
             continue
+        if "proton_seed" in payload and record.proton_seed is not None:
+            errors.append(
+                f"Stockfish Elo {rating} record {index} has a Proton limiter seed"
+            )
         for clock_name, clock in (
             ("white", record.white_clock_seconds),
             ("black", record.black_clock_seconds),
@@ -383,6 +387,59 @@ def validate_result(
         "Stockfish Elo list mismatch",
     )
 
+    if "proton_target_elo" in report:
+        require(
+            report.get("proton_target_elo") is None,
+            "certification report enables a Proton Elo target",
+        )
+    if "proton_seed_derivation" in report:
+        require(
+            report.get("proton_seed_derivation") is None,
+            "certification report declares Proton seed derivation",
+        )
+    if "stockfish_requested_elo" in report:
+        require(
+            report.get("stockfish_requested_elo") == protocol["opponent_elo"],
+            "requested Stockfish Elo metadata mismatch",
+        )
+    if "stockfish_effective_elo" in report:
+        require(
+            report.get("stockfish_effective_elo") == protocol["opponent_elo"],
+            "effective Stockfish Elo metadata mismatch",
+        )
+    if "proton_uci_elo_range" in report:
+        require(
+            report.get("proton_uci_elo_range") is None,
+            "certification report contains a limited-Proton Elo range",
+        )
+    if "stockfish_uci_elo_range" in report:
+        elo_range = report.get("stockfish_uci_elo_range")
+        valid_range = isinstance(elo_range, dict) and set(elo_range) == {
+            "minimum", "maximum", "default",
+        }
+        if valid_range:
+            minimum = elo_range.get("minimum")
+            maximum = elo_range.get("maximum")
+            default = elo_range.get("default")
+            valid_range = (
+                isinstance(minimum, int)
+                and not isinstance(minimum, bool)
+                and isinstance(maximum, int)
+                and not isinstance(maximum, bool)
+                and minimum > 0
+                and minimum <= maximum
+                and all(minimum <= rating <= maximum for rating in protocol["opponent_elo"])
+                and (
+                    default is None
+                    or (
+                        isinstance(default, int)
+                        and not isinstance(default, bool)
+                        and minimum <= default <= maximum
+                    )
+                )
+            )
+        require(valid_range, "Stockfish UCI Elo range metadata is invalid")
+
     results = report.get("results", [])
     if not isinstance(results, list):
         return [*errors, "results are not a list"]
@@ -393,6 +450,11 @@ def validate_result(
         if not isinstance(result, dict):
             errors.append(f"Stockfish Elo {rating} result is not an object")
             continue
+        if "opponent_elo_requested" in result:
+            require(
+                result.get("opponent_elo_requested") == rating,
+                f"Stockfish Elo {rating} requested-Elo metadata mismatch",
+            )
         records, record_errors = parse_records(
             result.get("records"), rating, protocol, openings
         )
