@@ -2,13 +2,28 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T17:13:14+01:00`
+- Last run: `2026-08-09T17:45:24+01:00`
 - Status: `passed`
-- Change kept: honest 3000-Elo control surface and deterministic calibration setup
-- Active branch: `agent/elo-3000-tooling`
-- Base: `origin/main` at `554d271`
+- Change kept: reserved confirmation budget for bounded limited play
+- Active branch: `agent/limiter-budget-reservation`
+- Base: `origin/main` at `1a39eb2`
 
 ## Latest evidence
+
+- Positive-loss limiter modes now separate main-search budget exhaustion from real stop/cancel state. The main phase reserves half the node cap or bounded hard time for one fresh same-depth candidate confirmation.
+- Bounded selection samples once from PVS-plausible moves. No alternative is returned unless the isolated verifier completes at the same depth and scores inside the configured loss allowance; every interruption falls back to the completed root best.
+- External stop sources are carried as a propagated list, caller deadlines remain sticky, and a bounded ponder that finishes before ponderhit returns the root best instead of starting an unbounded child verifier.
+- Zero-loss Elo 3000 and full-strength searches do not reserve. On the 6,000-node regression both return `Qa7` at depth 5 with the historical 6,001-node accounting result.
+- At Elo 800 with a 3,450-node cap, seed 27 now spends more than half the budget, completes depth 3, and returns a real confirmed alternative without exceeding the parent cap. A two-node search still returns a legal move within its cap.
+- On `rnbqkbnr/pp1ppppp/8/8/2N5/3P4/PPP1PPPP/R1BQKBNR b KQkq - 0 3`, Elo 2700 seed 32 at depth 6 selects `g8f6` with a 22,000-node budget. At 7,500 nodes the verifier exhausts its reserve and deterministically falls back to root best `d7d5` within the total cap.
+- Final node scans over the first 50 UHO positions and five seeds found 208/250 Elo-800 alternatives with maximum fresh loss 642/700 cp, and 10/250 Elo-2700 alternatives with maximum loss 22/22 cp. There were no violations.
+- At 50 ms over the first 30 positions and five seeds, Elo 800 selected 118/150 alternatives and Elo 2700 selected 7/150, again with zero loss-band violations. Median wall times were 33.72 ms and 28.02 ms; the 95th percentiles were 50.28 ms and 43.10 ms.
+- Full strength and Elo 3000 matched exactly on best move, completed main depth, main nodes, score and PV across the first 100 UHO positions at 6,000 nodes.
+- Full validation passes: 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The Windows executable SHA-256 is `550cd58baf9ffd42279d92f4def94b3e07ba410dc79b1af89f65b507e7dfcf73`; the certification manifest pins it.
+- This run makes bounded limiting effective and fail-closed. It does not claim calibrated Elo or increased full strength.
+
+## Previous run: Elo 3000 control and calibration tooling
 
 - `UCI_Elo` now advertises `default 2800 min 800 max 3000`. Every integer setting through 2800 retains the old skill/loss profile. From 2801 to 3000, skill remains 20 and the base loss allowance decreases monotonically from 8 cp to 0 cp; only 3000 reaches zero.
 - The Elo-3000 regression is non-vacuous. On `rnb1kb1r/ppp1pppp/5q2/8/8/3PBQ2/PPP2KPP/RN3B1R w kq - 2 9` at depth 3, seed 2 chooses `f3f6` instead of root best `b1c3`; a fresh restricted search scores the alternative `-55` against the root score `-84`.

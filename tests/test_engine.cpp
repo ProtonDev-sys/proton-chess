@@ -1,4 +1,5 @@
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -388,7 +389,7 @@ void test_search_tactics() {
     const proton::SearchResult full_result =
         full_search->think(loss_band_position, loss_band_limits);
 
-    const auto exact_score_for = [&](const proton::Move& selected) {
+    const auto exact_score_for = [&](const proton::Move& selected, int depth = 4) {
         proton::EngineOptions verify_options;
         verify_options.use_book = false;
         verify_options.hash_mb = 1;
@@ -399,7 +400,7 @@ void test_search_tactics() {
         proton::Position verify_position;
         expect(verify_position.set_fen(loss_band_fen), "loss-band verification FEN parses");
         proton::SearchLimits verify_limits;
-        verify_limits.depth = 4;
+        verify_limits.depth = depth;
         verify_limits.search_moves_specified = true;
         verify_limits.search_moves.push_back(selected);
         return verify_search->think(verify_position, verify_limits).score_cp;
@@ -483,10 +484,170 @@ void test_search_tactics() {
     interrupted_limits.node_limit = 3450;
     const proton::SearchResult interrupted_result =
         interrupted_search->think(interrupted_position, interrupted_limits);
-    expect(interrupted_result.nodes >= interrupted_limits.node_limit,
-           "loss-band verification reaches the cancellation node limit");
-    expect(full_result.score_cp - exact_score_for(interrupted_result.best) <= 700,
-           "an interrupted verification never admits an out-of-band move");
+    expect(interrupted_result.depth == 3,
+           "reserved node budget keeps the last complete main-search depth");
+    expect(interrupted_result.nodes > interrupted_limits.node_limit / 2 &&
+               interrupted_result.nodes <= interrupted_limits.node_limit,
+           "confirmation uses the reserve without exceeding the total node limit");
+    expect(interrupted_result.best != full_result.best,
+           "node-limited human play can return a real alternative");
+    const int interrupted_best_score =
+        exact_score_for(full_result.best, interrupted_result.depth);
+    const int interrupted_selected_score =
+        exact_score_for(interrupted_result.best, interrupted_result.depth);
+    expect(interrupted_best_score - interrupted_selected_score <= 700,
+           "node-limited confirmation keeps the selected move in band");
+
+    proton::Evaluator deadline_evaluator;
+    deadline_evaluator.set_options(interrupted_options);
+    auto deadline_search =
+        std::make_unique<proton::Search>(deadline_evaluator, interrupted_options);
+    proton::Position deadline_position;
+    expect(deadline_position.set_fen(loss_band_fen), "deadline FEN parses");
+    auto caller_deadline = std::chrono::steady_clock::time_point::max();
+    proton::SearchLimits deadline_limits = interrupted_limits;
+    deadline_limits.external_deadline = &caller_deadline;
+    const proton::SearchResult deadline_result = deadline_search->think(
+        deadline_position,
+        deadline_limits,
+        [&](const proton::SearchInfo& info) {
+            if (info.depth == 3) caller_deadline = std::chrono::steady_clock::now();
+        });
+    expect(caller_deadline != std::chrono::steady_clock::time_point::max(),
+           "deadline regression reaches the reserved-budget transition");
+    expect(deadline_result.depth == 3 && deadline_result.best == full_result.best &&
+               deadline_result.nodes < deadline_limits.node_limit / 2,
+           "caller deadline stays sticky and suppresses post-search randomisation");
+
+    proton::Evaluator ponder_full_evaluator;
+    ponder_full_evaluator.set_options(full_options);
+    auto ponder_full_search =
+        std::make_unique<proton::Search>(ponder_full_evaluator, full_options);
+    proton::Position ponder_full_position;
+    expect(ponder_full_position.set_fen(loss_band_fen), "ponder FEN parses");
+    proton::SearchLimits ponder_limits;
+    ponder_limits.depth = 3;
+    ponder_limits.ponder = true;
+    const proton::SearchResult ponder_full_result =
+        ponder_full_search->think(ponder_full_position, ponder_limits);
+
+    proton::Evaluator ponder_limited_evaluator;
+    ponder_limited_evaluator.set_options(interrupted_options);
+    auto ponder_limited_search =
+        std::make_unique<proton::Search>(ponder_limited_evaluator, interrupted_options);
+    proton::Position ponder_limited_position;
+    expect(ponder_limited_position.set_fen(loss_band_fen),
+           "limited ponder FEN parses");
+    const proton::SearchResult ponder_limited_result =
+        ponder_limited_search->think(ponder_limited_position, ponder_limits);
+    expect(ponder_limited_result.best == ponder_full_result.best &&
+               ponder_limited_result.nodes == ponder_full_result.nodes,
+           "pre-hit bounded ponder returns the root best without confirmation");
+
+    proton::Evaluator tiny_budget_evaluator;
+    tiny_budget_evaluator.set_options(interrupted_options);
+    auto tiny_budget_search =
+        std::make_unique<proton::Search>(tiny_budget_evaluator, interrupted_options);
+    proton::Position tiny_budget_position;
+    expect(tiny_budget_position.set_fen(loss_band_fen), "tiny-budget FEN parses");
+    std::vector<proton::Move> tiny_budget_legal;
+    tiny_budget_position.generate_legal_moves(tiny_budget_legal);
+    proton::SearchLimits tiny_budget_limits = loss_band_limits;
+    tiny_budget_limits.node_limit = 2;
+    const proton::SearchResult tiny_budget_result =
+        tiny_budget_search->think(tiny_budget_position, tiny_budget_limits);
+    expect(tiny_budget_result.nodes <= tiny_budget_limits.node_limit,
+           "tiny human budget does not overshoot its node cap");
+    expect(std::find(tiny_budget_legal.begin(), tiny_budget_legal.end(),
+                     tiny_budget_result.best) != tiny_budget_legal.end(),
+           "tiny human budget still returns a legal move");
+
+    proton::Evaluator full_node_evaluator;
+    full_node_evaluator.set_options(full_options);
+    auto full_node_search =
+        std::make_unique<proton::Search>(full_node_evaluator, full_options);
+    proton::Position full_node_position;
+    expect(full_node_position.set_fen(loss_band_fen), "full node-limit FEN parses");
+    proton::SearchLimits full_node_limits;
+    full_node_limits.node_limit = 6000;
+    const proton::SearchResult full_node_result =
+        full_node_search->think(full_node_position, full_node_limits);
+    expect(full_node_result.best.to_uci() == "d4a7" && full_node_result.depth == 5 &&
+               full_node_result.nodes == full_node_limits.node_limit + 1,
+           "full-strength node-limited search is unchanged (move " +
+               full_node_result.best.to_uci() + ", depth " +
+               std::to_string(full_node_result.depth) + ", nodes " +
+               std::to_string(full_node_result.nodes) + ")");
+
+    proton::Evaluator elo_3000_node_evaluator;
+    elo_3000_node_evaluator.set_options(elo_3000_options);
+    auto elo_3000_node_search =
+        std::make_unique<proton::Search>(elo_3000_node_evaluator, elo_3000_options);
+    proton::Position elo_3000_node_position;
+    expect(elo_3000_node_position.set_fen(loss_band_fen),
+           "Elo 3000 node-limit FEN parses");
+    const proton::SearchResult elo_3000_node_result =
+        elo_3000_node_search->think(elo_3000_node_position, full_node_limits);
+    expect(elo_3000_node_result.best == full_node_result.best &&
+               elo_3000_node_result.depth == full_node_result.depth &&
+               elo_3000_node_result.nodes == full_node_result.nodes,
+           "zero-loss Elo 3000 keeps the full bounded search budget");
+
+    const std::string confirmation_cancel_fen =
+        "rnbqkbnr/pp1ppppp/8/8/2N5/3P4/PPP1PPPP/R1BQKBNR b KQkq - 0 3";
+    proton::SearchLimits confirmation_depth;
+    confirmation_depth.depth = 6;
+    proton::Evaluator confirmation_full_evaluator;
+    confirmation_full_evaluator.set_options(full_options);
+    auto confirmation_full_search =
+        std::make_unique<proton::Search>(confirmation_full_evaluator, full_options);
+    proton::Position confirmation_full_position;
+    expect(confirmation_full_position.set_fen(confirmation_cancel_fen),
+           "confirmation-cancel FEN parses");
+    const proton::SearchResult confirmation_full_result =
+        confirmation_full_search->think(confirmation_full_position, confirmation_depth);
+    expect(confirmation_full_result.best.to_uci() == "d7d5",
+           "confirmation-cancel fixture has the expected root best");
+
+    proton::EngineOptions confirmation_options = full_options;
+    confirmation_options.uci_limit_strength = true;
+    confirmation_options.uci_elo = 2700;
+    confirmation_options.human_seed = 32;
+    proton::Evaluator confirmation_wide_evaluator;
+    confirmation_wide_evaluator.set_options(confirmation_options);
+    auto confirmation_wide_search =
+        std::make_unique<proton::Search>(confirmation_wide_evaluator,
+                                         confirmation_options);
+    proton::Position confirmation_wide_position;
+    expect(confirmation_wide_position.set_fen(confirmation_cancel_fen),
+           "wide confirmation-cancel FEN parses");
+    proton::SearchLimits confirmation_wide_limits = confirmation_depth;
+    confirmation_wide_limits.node_limit = 22000;
+    const proton::SearchResult confirmation_wide_result =
+        confirmation_wide_search->think(confirmation_wide_position,
+                                         confirmation_wide_limits);
+    expect(confirmation_wide_result.best.to_uci() == "g8f6",
+           "wide reserve completes and admits the plausible alternative");
+
+    proton::Evaluator confirmation_tight_evaluator;
+    confirmation_tight_evaluator.set_options(confirmation_options);
+    auto confirmation_tight_search =
+        std::make_unique<proton::Search>(confirmation_tight_evaluator,
+                                         confirmation_options);
+    proton::Position confirmation_tight_position;
+    expect(confirmation_tight_position.set_fen(confirmation_cancel_fen),
+           "tight confirmation-cancel FEN parses");
+    proton::SearchLimits confirmation_tight_limits = confirmation_depth;
+    confirmation_tight_limits.node_limit = 7500;
+    const proton::SearchResult confirmation_tight_result =
+        confirmation_tight_search->think(confirmation_tight_position,
+                                          confirmation_tight_limits);
+    expect(confirmation_tight_result.depth == 6 &&
+               confirmation_tight_result.best == confirmation_full_result.best,
+           "exhausted confirmation falls back to the completed root best");
+    expect(confirmation_tight_result.nodes > confirmation_full_result.nodes &&
+               confirmation_tight_result.nodes <= confirmation_tight_limits.node_limit,
+           "cancelled confirmation stays inside the parent's total node budget");
 
     std::atomic<bool> primary_stop{false};
     std::atomic<bool> secondary_stop{true};
@@ -496,12 +657,11 @@ void test_search_tactics() {
     proton::Position dual_stop_position;
     expect(dual_stop_position.set_fen(loss_band_fen), "dual-stop FEN parses");
     proton::SearchLimits dual_stop_limits = loss_band_limits;
-    dual_stop_limits.external_stop = &primary_stop;
-    dual_stop_limits.secondary_external_stop = &secondary_stop;
+    dual_stop_limits.external_stops = {&primary_stop, &secondary_stop};
     const proton::SearchResult dual_stop_result =
         dual_stop_search.think(dual_stop_position, dual_stop_limits);
     expect(dual_stop_result.depth == 0 && dual_stop_result.nodes == 0,
-           "either external cancellation source stops a nested search");
+           "either external cancellation source stops the search");
 
     const std::string tight_band_fen =
         "1rbqk2r/pp2ppbp/2p2np1/3p4/3P4/P1NBP3/1PP2PPP/R2QK1NR b KQk - 2 7";
