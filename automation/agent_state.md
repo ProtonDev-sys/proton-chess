@@ -2,27 +2,37 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T05:53:48+01:00`
+- Last run: `2026-08-09T06:15:02+01:00`
 - Status: `passed`
-- Change kept: real Fischer clocks, isolated game lifecycle, watchdogs, and match provenance
-- Active branch: `agent/fischer-match-lifecycle`
-- Base: `origin/main` at `35f9f69`
+- Change kept: pair-aware inference, pentanomial summaries, and atomic match checkpoints
+- Active branch: `agent/pair-aware-match-stats`
+- Base: `origin/main` at `b79a5f57`
 
 ## Latest evidence
 
-- `tools/estimate_elo.py` now accepts `--base-seconds 60 --increment 0.6` while retaining legacy fixed movetime.
+- Each color-swapped opening pair is one statistical sample. The two games within a pair are not treated as independent.
+- Schema version 2 reports normalized pair scores, raw-score pentanomial counts, and a two-sided 95% Hoeffding interval over complete pairs.
+- The report records the seeded without-replacement opening schedule, the finite-population bound assumption, residual shared-host caveat, and warns that the result is not a universal Elo rating.
+- An incomplete one-game checkpoint reports zero complete pairs and the conservative `[0, 1]` interval rather than manufacturing evidence.
+- A deliberately perfect 400-game/200-pair fixture produces a lower bound above 50% and clears the significance gate.
+- JSON reports are written atomically after engine identification and every completed game, before console output can fail. An interruption leaves the last intact report marked `running`; successful completion changes it to `complete` with a timestamp.
+- Running checkpoints distinguish the all-completed-game score from the complete-pair score used for inference.
+- Added ten focused inference, validation, callback, lifecycle-state, and atomic-write tests; the match-tool suite is now 19/19.
+- Real two-game Stockfish-3000 Fischer smoke at `0.2+0.02` produced one drawn pair, pentanomial `{1.0: 1}`, interval `[0, 1]`, complete provenance, and a final `complete` checkpoint.
+- Full canonical validation and 3/3 CTest targets passed.
+- The smoke run is not a strength claim.
+
+## Previous run: Fischer match lifecycle
+
+- `tools/estimate_elo.py` accepts `--base-seconds 60 --increment 0.6` while retaining legacy fixed movetime.
 - Each game uses fresh engine processes and a distinct token. `ucinewgame` and `isready` complete before the chess clock starts.
 - Wall-clock time is deducted before increment. Exact zero and negative remaining time both flag; an increment cannot rescue a flagged move.
 - Clock-only UCI searches run through an external watchdog. A stuck command is cancelled and its engine process is closed.
-- The report schema records engine IDs, hashes and options; opening/tool hashes; raw moves; opening indices; clocks; terminations; Git revision/dirty state; Python versions; and host details.
-- Removed the old unpaired confidence interval because it produced false zero-width intervals for all-draw samples. Pair-aware inference is the next separate change.
-- Added nine focused match-tool tests. CMake runs them when python-chess is installed and skips them cleanly otherwise.
-- Real Stockfish-3000 smoke:
-  - two paired games at `0.2+0.02`, both completed to the 40-ply smoke cap with clock/provenance records;
-  - two legacy fixed-movetime games also completed to the cap;
-  - no lingering engine process remained.
+- The schema records engine IDs, hashes and options; opening/tool hashes; raw moves; opening indices; clocks; terminations; Git revision/dirty state; Python versions; and host details.
+- Removed the invalid old unpaired confidence interval.
+- Added nine focused clock, flag, timeout, schedule, and lifecycle tests.
 - Full canonical validation and 3/3 CTest targets passed.
-- This is match infrastructure, not a strength claim.
+- This was match infrastructure, not a strength claim.
 
 ## Previous run: quiet-mate horizon
 
@@ -82,7 +92,6 @@
 
 ## Next target
 
-- Add pair-aware confidence intervals and incremental JSON checkpoints for long matches.
 - Pin a neutral opening suite and the exact Stockfish-3000 `60+0.6` protocol, then run the first trustworthy baseline.
 - Repair the current human move selector and UCI Elo mapping before extending the advertised 2800 ceiling.
 - Keep future engine changes only with focused regressions, canonical validation, and paired before/after strength evidence.

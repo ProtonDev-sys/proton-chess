@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import threading
 import unittest
+from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 import chess
 import chess.engine
@@ -37,6 +43,26 @@ class ScriptedPlayer:
 
 
 class EstimateEloTests(unittest.TestCase):
+    @staticmethod
+    def record(
+        pair: int,
+        color: str,
+        point: float,
+        opening_index: int = 7,
+    ) -> estimate_elo.GameRecord:
+        return estimate_elo.GameRecord(
+            pair=pair,
+            proton_color=color,
+            opening_index=opening_index,
+            opening_moves=["e2e4"],
+            point=point,
+            termination="test",
+            plies=1,
+            moves=["e2e4"],
+            white_clock_seconds=None,
+            black_clock_seconds=None,
+        )
+
     def test_game_preparation_binds_token_before_clocked_play(self) -> None:
         loop = asyncio.new_event_loop()
         loop_thread = threading.Thread(target=loop.run_forever)
@@ -247,6 +273,187 @@ class EstimateEloTests(unittest.TestCase):
                 player=player, clock=lambda moments=moments: next(moments))
         self.assertIs(player.calls[0][0], token_a)
         self.assertIs(player.calls[1][0], token_b)
+
+    def test_drawn_pair_has_non_degenerate_conservative_interval(self) -> None:
+        result = estimate_elo.summarize_level(3000, [
+            self.record(1, "white", 0.5),
+            self.record(1, "black", 0.5),
+        ])
+        self.assertEqual(result.pair_count, 1)
+        self.assertEqual(result.pair_scores, [0.5])
+        self.assertEqual(result.complete_pair_score, 0.5)
+        self.assertEqual(result.pentanomial_counts["1.0"], 1)
+        self.assertEqual((result.score_ci95_low, result.score_ci95_high), (0.0, 1.0))
+        self.assertFalse(result.significant_above_50)
+
+    def test_incomplete_pair_is_checkpointed_but_not_counted_as_sample(self) -> None:
+        result = estimate_elo.summarize_level(3000, [self.record(1, "white", 1.0)])
+        self.assertEqual(result.games, 1)
+        self.assertEqual(result.pair_count, 0)
+        self.assertIsNone(result.complete_pair_score)
+        self.assertEqual(sum(result.pentanomial_counts.values()), 0)
+        self.assertEqual((result.score_ci95_low, result.score_ci95_high), (0.0, 1.0))
+        self.assertFalse(result.significant_above_50)
+
+    def test_perfect_two_hundred_pair_result_clears_the_gate(self) -> None:
+        records = [
+            self.record(pair, color, 1.0)
+            for pair in range(1, 201)
+            for color in ("white", "black")
+        ]
+        result = estimate_elo.summarize_level(3000, records)
+        self.assertEqual(result.games, 400)
+        self.assertEqual(result.pair_count, 200)
+        self.assertEqual(result.pentanomial_counts["2.0"], 200)
+        self.assertGreater(result.score_ci95_low, 0.5)
+        self.assertTrue(result.significant_above_50)
+
+    def test_pentanomial_counts_cover_all_pair_outcomes(self) -> None:
+        outcomes = ((0.0, 0.0), (0.0, 0.5), (0.5, 0.5), (0.5, 1.0), (1.0, 1.0))
+        records = [
+            self.record(pair, color, point)
+            for pair, points in enumerate(outcomes, start=1)
+            for color, point in zip(("white", "black"), points, strict=True)
+        ]
+        result = estimate_elo.summarize_level(3000, records)
+        self.assertEqual(
+            result.pentanomial_counts,
+            {"0.0": 1, "0.5": 1, "1.0": 1, "1.5": 1, "2.0": 1},
+        )
+
+    def test_pair_validation_rejects_mismatched_openings(self) -> None:
+        records = [
+            self.record(1, "white", 0.5, opening_index=7),
+            self.record(1, "black", 0.5, opening_index=8),
+        ]
+        with self.assertRaisesRegex(ValueError, "different openings"):
+            estimate_elo.complete_pair_scores(records)
+
+    def test_summary_rejects_invalid_game_points(self) -> None:
+        with self.assertRaisesRegex(ValueError, "game points"):
+            estimate_elo.summarize_level(3000, [self.record(1, "white", 0.25)])
+
+    def test_run_level_checkpoints_after_each_completed_game(self) -> None:
+        checkpoints: list[estimate_elo.MatchResult] = []
+        outcomes = [
+            estimate_elo.GameOutcome(1.0, "test", 1, ["e2e4"], None, None),
+            estimate_elo.GameOutcome(0.5, "test", 1, ["e2e4"], None, None),
+        ]
+        args = Namespace(games=2, seed=17, hash=16, max_plies=40)
+        with (
+            mock.patch.object(estimate_elo.chess.engine.SimpleEngine, "popen_uci", return_value=object()),
+            mock.patch.object(estimate_elo, "configure_engines"),
+            mock.patch.object(estimate_elo, "prepare_engine_for_game"),
+            mock.patch.object(estimate_elo, "safe_quit"),
+            mock.patch.object(estimate_elo, "play_game", side_effect=outcomes),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = estimate_elo.run_level(
+                Path("proton"),
+                Path("stockfish"),
+                3000,
+                [["e2e4"]],
+                args,
+                estimate_elo.TimeControl(0.01, None, 0.0, 1.0),
+                checkpoint=checkpoints.append,
+            )
+        self.assertEqual([item.games for item in checkpoints], [1, 2])
+        self.assertEqual([item.pair_count for item in checkpoints], [0, 1])
+        self.assertIsNone(checkpoints[0].complete_pair_score)
+        self.assertEqual(checkpoints[1].complete_pair_score, 0.75)
+        self.assertEqual(result, checkpoints[-1])
+
+    def test_main_checkpoints_running_then_complete_across_levels(self) -> None:
+        snapshots: list[dict[str, object]] = []
+        original_write = estimate_elo.write_json_atomic
+
+        def capture(path: Path, payload: object) -> None:
+            snapshots.append(json.loads(json.dumps(payload)))
+            original_write(path, payload)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            proton = root / "proton.exe"
+            stockfish = root / "stockfish.exe"
+            openings = root / "openings.txt"
+            report_path = root / "match.json"
+            proton.write_bytes(b"proton")
+            stockfish.write_bytes(b"stockfish")
+            openings.write_text("e2e4 e7e5\n", encoding="utf-8")
+            args = Namespace(
+                proton=proton,
+                stockfish=stockfish,
+                opponent_elo=[2400, 3000],
+                games=2,
+                move_time=0.01,
+                base_seconds=None,
+                increment=0.0,
+                watchdog_grace=1.0,
+                max_plies=40,
+                hash=16,
+                seed=17,
+                openings=openings,
+                json_path=report_path,
+            )
+
+            def fake_level(
+                proton_path: Path,
+                stockfish_path: Path,
+                rating: int,
+                opening_lines: list[list[str]],
+                parsed_args: Namespace,
+                time_control: estimate_elo.TimeControl,
+                checkpoint: object = None,
+            ) -> estimate_elo.MatchResult:
+                del proton_path, stockfish_path, opening_lines, parsed_args, time_control
+                first = estimate_elo.summarize_level(
+                    rating, [self.record(1, "white", 0.5)])
+                complete = estimate_elo.summarize_level(
+                    rating,
+                    [self.record(1, "white", 0.5), self.record(1, "black", 0.5)],
+                )
+                assert callable(checkpoint)
+                checkpoint(first)
+                checkpoint(complete)
+                return complete
+
+            artifact = estimate_elo.EngineArtifact("test", "test", "test", "0" * 64)
+            with (
+                mock.patch.object(estimate_elo, "parse_args", return_value=args),
+                mock.patch.object(estimate_elo, "identify_engine", return_value=artifact),
+                mock.patch.object(estimate_elo, "run_level", side_effect=fake_level),
+                mock.patch.object(estimate_elo, "write_json_atomic", side_effect=capture),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(estimate_elo.main(), 0)
+
+            final = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(snapshots[0]["status"], "running")
+        self.assertTrue(all(item["status"] == "running" for item in snapshots[:-1]))
+        self.assertEqual(snapshots[-1]["status"], "complete")
+        self.assertIsNotNone(snapshots[-1]["completed_utc"])
+        self.assertEqual(len(final["results"]), 2)
+        self.assertEqual(final["status"], "complete")
+
+    def test_json_checkpoint_replaces_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "nested" / "match.json"
+            estimate_elo.write_json_atomic(path, {"status": "running", "games": 1})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["games"], 1)
+            estimate_elo.write_json_atomic(path, {"status": "complete", "games": 2})
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload, {"status": "complete", "games": 2})
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+
+    def test_failed_json_checkpoint_preserves_target_and_removes_temporary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "match.json"
+            estimate_elo.write_json_atomic(path, {"status": "running"})
+            with self.assertRaises(TypeError):
+                estimate_elo.write_json_atomic(path, {"invalid": object()})
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload, {"status": "running"})
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
 
 if __name__ == "__main__":
