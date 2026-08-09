@@ -2,13 +2,28 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T05:19:04+01:00`
+- Last run: `2026-08-09T05:32:48+01:00`
 - Status: `passed`
-- Change kept: made immediate UCI search cancellation race-free
-- Active branch: `agent/fix-immediate-stop-race`
-- Base: `origin/main` at `069f547`
+- Change kept: detect shallow quiet mate-in-one at the quiescence horizon
+- Active branch: `agent/fix-quiet-mate-horizon`
+- Base: `origin/main` at `835224a`
 
 ## Latest evidence
+
+- Target FEN: `3r2k1/ppB2pp1/6b1/7p/1n1Pq3/2Q3P1/PP3P1P/2KR3R w - - 1 22`.
+- Before the change, restricted `c3b4` at depth 1 scored `+617` in 2 nodes with PV `c3b4`; depth 2 found `c3b4 e4c2` as mate against Proton in 102 nodes.
+- Quiescence now checks for an immediate legal quiet mate only within the first three plies. It returns the exact mate score and preserves the mating move in the TT and PV without adding general quiet-check recursion.
+- After the change, the same restricted depth-1 search reports mate against Proton in 2 nodes with PV `c3b4 e4c2`.
+- Exact pre/post depth-12 comparison kept identical node counts, scores, best moves, and PVs on all three fixtures:
+  - startpos: `970427` nodes
+  - Kiwipete: `551591` nodes
+  - endgame: `253200` nodes
+- Median aggregate benchmark time across three fresh processes was `1089 ms` before and `1076 ms` after. No slowdown claim is made from that small timing sample; it rules out the earlier broader scan's measurable overhead.
+- A four-game paired fixed-movetime Stockfish-3000 smoke scored `0-4` both before and after. This is only a gross regression check; the current estimator cannot support a strength claim.
+- Full canonical validation and CTest passed.
+- No Elo improvement claim is made from the tactical correction.
+
+## Previous run: UCI cancellation race
 
 - Before the change, three independent eight-search transcripts containing `go infinite` followed immediately by `stop` all timed out.
 - Root cause: the input thread could request a stop before the worker entered `Search::think`; the worker then cleared that request and searched indefinitely while the input thread blocked in `join()`.
@@ -51,7 +66,7 @@
 
 ## Next target
 
-- Fix the reproduced quiet-mate quiescence horizon without broadly expanding quiet search.
-- Then establish the pinned Stockfish-3000 match protocol and a trustworthy 60+0.6 baseline on 0.2.0.
+- Establish the pinned Stockfish-3000 match protocol and a trustworthy 60+0.6 baseline on 0.2.0.
+- Replace the estimator's invalid zero-variance confidence interval with pair-aware statistics and record complete match provenance.
 - Repair the current human move selector and UCI Elo mapping before extending the advertised 2800 ceiling.
 - Keep future engine changes only with focused regressions, canonical validation, and paired before/after strength evidence.
