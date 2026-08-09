@@ -365,10 +365,13 @@ class EstimateEloTests(unittest.TestCase):
 
     def test_main_checkpoints_running_then_complete_across_levels(self) -> None:
         snapshots: list[dict[str, object]] = []
+        events: list[str] = []
         original_write = estimate_elo.write_json_atomic
 
         def capture(path: Path, payload: object) -> None:
-            snapshots.append(json.loads(json.dumps(payload)))
+            snapshot = json.loads(json.dumps(payload))
+            snapshots.append(snapshot)
+            events.append(f"write:{snapshot['status']}")
             original_write(path, payload)
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -423,7 +426,7 @@ class EstimateEloTests(unittest.TestCase):
                 mock.patch.object(estimate_elo, "identify_engine", return_value=artifact),
                 mock.patch.object(estimate_elo, "run_level", side_effect=fake_level),
                 mock.patch.object(estimate_elo, "write_json_atomic", side_effect=capture),
-                contextlib.redirect_stdout(io.StringIO()),
+                mock.patch("builtins.print", side_effect=lambda *args, **kwargs: events.append("print")),
             ):
                 self.assertEqual(estimate_elo.main(), 0)
 
@@ -432,6 +435,7 @@ class EstimateEloTests(unittest.TestCase):
         self.assertTrue(all(item["status"] == "running" for item in snapshots[:-1]))
         self.assertEqual(snapshots[-1]["status"], "complete")
         self.assertIsNotNone(snapshots[-1]["completed_utc"])
+        self.assertEqual(events[-2:], ["write:complete", "print"])
         self.assertEqual(len(final["results"]), 2)
         self.assertEqual(final["status"], "complete")
 

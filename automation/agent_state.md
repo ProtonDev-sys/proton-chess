@@ -15,7 +15,7 @@
 - The report records the seeded without-replacement opening schedule, the finite-population bound assumption, residual shared-host caveat, and warns that the result is not a universal Elo rating.
 - An incomplete one-game checkpoint reports zero complete pairs and the conservative `[0, 1]` interval rather than manufacturing evidence.
 - A deliberately perfect 400-game/200-pair fixture produces a lower bound above 50% and clears the significance gate.
-- JSON reports are written atomically after engine identification and every completed game, before console output can fail. An interruption leaves the last intact report marked `running`; successful completion changes it to `complete` with a timestamp.
+- JSON reports are written atomically after engine identification and every completed game, before corresponding console output. The final `complete` state is also persisted before the rendered report is printed. An interruption leaves the last intact checkpoint usable.
 - Running checkpoints distinguish the all-completed-game score from the complete-pair score used for inference.
 - Added ten focused inference, validation, callback, lifecycle-state, and atomic-write tests; the match-tool suite is now 19/19.
 - Real two-game Stockfish-3000 Fischer smoke at `0.2+0.02` produced one drawn pair, pentanomial `{1.0: 1}`, interval `[0, 1]`, complete provenance, and a final `complete` checkpoint.

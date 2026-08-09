@@ -688,9 +688,9 @@ def main() -> int:
     report.status = "complete"
     report.completed_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rendered = json.dumps(asdict(report), indent=2)
-    print(rendered)
     if json_path is not None:
         write_json_atomic(json_path, asdict(report))
+    print(rendered)
     return 0
 
 
