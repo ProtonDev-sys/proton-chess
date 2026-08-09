@@ -19,3 +19,15 @@ python tools/check_match_result.py matches/stockfish18_3000_60+0.6.json out/stoc
 ```
 
 The checker rejects changed clocks, hashes, options, seeds, incomplete pairs, short matches and lower bounds at or below 50%.
+
+## Candidate versus baseline
+
+Use the separate A/B runner to compare two Proton builds. It stages verified private copies, starts fresh processes for every game, applies the same explicit full-strength options and per-game seed to both binaries, reuses each opening with colors swapped, and reports score from the candidate's point of view.
+
+```powershell
+python tools/compare_engines.py build/Release/proton_chess.exe C:\path\to\baseline.exe --games 400 --move-time 0.05 --max-plies 240 --hash 16 --seed 20260809 --openings openings/uho_lichess_4852_v1_200.epd --json build/bench/candidate-vs-baseline.json
+```
+
+The report contains both binary hashes, both UCI identities, the exact option map, opening and tool hashes, every move, pair scores, pentanomial counts, a conservative score interval, an estimated relative Elo delta and an exact paired sign-flip result. It does not assign either engine an absolute Elo.
+
+This tool is deliberately separate from the pinned Stockfish certification runner. Changes to A/B reporting cannot silently change the certification protocol or its runner hash.
