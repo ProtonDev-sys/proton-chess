@@ -15,6 +15,7 @@ import random
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -109,13 +110,23 @@ class MatchResult:
     losses: int
     score: float
     estimated_elo: float
+    pair_count: int
+    pair_scores: list[float]
+    complete_pair_score: float | None
+    pentanomial_counts: dict[str, int]
+    confidence_method: str
+    score_ci95_low: float
+    score_ci95_high: float
+    significant_above_50: bool
     records: list[GameRecord]
 
 
 @dataclass
 class MatchReport:
     schema_version: int
+    status: str
     created_utc: str
+    completed_utc: str | None
     seed: int
     requested_games_per_level: int
     max_plies: int
@@ -132,6 +143,11 @@ class MatchReport:
     host: dict[str, Any]
     proton_options: dict[str, Any]
     stockfish_options: dict[str, Any]
+    statistical_unit: str
+    opening_selection: str
+    confidence_level: float
+    confidence_reference: str
+    confidence_assumptions: list[str]
     results: list[MatchResult]
 
 
@@ -208,12 +224,109 @@ def logistic_elo(opponent_elo: int, score: float) -> float:
     return opponent_elo + 400.0 * math.log10(score / (1.0 - score))
 
 
+def complete_pair_scores(records: list[GameRecord]) -> list[float]:
+    grouped: dict[int, list[GameRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.pair, []).append(record)
+
+    scores: list[float] = []
+    for pair in sorted(grouped):
+        pair_records = grouped[pair]
+        if len(pair_records) == 1:
+            continue
+        if len(pair_records) != 2:
+            raise ValueError(f"pair {pair} has {len(pair_records)} games")
+        if {record.proton_color for record in pair_records} != {"white", "black"}:
+            raise ValueError(f"pair {pair} does not contain both Proton colors")
+        if len({record.opening_index for record in pair_records}) != 1:
+            raise ValueError(f"pair {pair} uses different openings")
+        scores.append(sum(record.point for record in pair_records) / 2.0)
+    return scores
+
+
+def hoeffding_interval(
+    observations: list[float], confidence: float = 0.95
+) -> tuple[float, float]:
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between zero and one")
+    if any(value < 0.0 or value > 1.0 for value in observations):
+        raise ValueError("Hoeffding observations must lie in [0, 1]")
+    if not observations:
+        return 0.0, 1.0
+    mean = statistics.fmean(observations)
+    alpha = 1.0 - confidence
+    radius = math.sqrt(math.log(2.0 / alpha) / (2.0 * len(observations)))
+    return max(0.0, mean - radius), min(1.0, mean + radius)
+
+
+def pentanomial_counts(pair_scores: list[float]) -> dict[str, int]:
+    labels = ("0.0", "0.5", "1.0", "1.5", "2.0")
+    counts = {label: 0 for label in labels}
+    for score in pair_scores:
+        category = round(score * 4.0)
+        if category < 0 or category >= len(labels) or abs(score * 4.0 - category) > 1e-9:
+            raise ValueError(f"invalid paired score: {score}")
+        counts[labels[category]] += 1
+    return counts
+
+
+def summarize_level(opponent_elo: int, records: list[GameRecord]) -> MatchResult:
+    if not records:
+        raise ValueError("cannot summarize an empty match level")
+    points = [record.point for record in records]
+    if any(point not in {0.0, 0.5, 1.0} for point in points):
+        raise ValueError("game points must be 0, 0.5, or 1")
+    score = statistics.fmean(points)
+    pairs = complete_pair_scores(records)
+    ci_low, ci_high = hoeffding_interval(pairs)
+    return MatchResult(
+        opponent_elo=opponent_elo,
+        games=len(points),
+        wins=points.count(1.0),
+        draws=points.count(0.5),
+        losses=points.count(0.0),
+        score=score,
+        estimated_elo=logistic_elo(opponent_elo, score),
+        pair_count=len(pairs),
+        pair_scores=pairs,
+        complete_pair_score=statistics.fmean(pairs) if pairs else None,
+        pentanomial_counts=pentanomial_counts(pairs),
+        confidence_method="hoeffding_two_sided_95_over_opening_pairs",
+        score_ci95_low=ci_low,
+        score_ci95_high=ci_high,
+        significant_above_50=ci_low > 0.5,
+        records=list(records),
+    )
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def write_json_atomic(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def git_revision(root: Path) -> str | None:
@@ -404,6 +517,7 @@ def run_level(
     openings: list[list[str]],
     args: argparse.Namespace,
     time_control: TimeControl,
+    checkpoint: Callable[[MatchResult], None] | None = None,
 ) -> MatchResult:
     games = args.games + args.games % 2
     pair_count = games // 2
@@ -446,6 +560,9 @@ def run_level(
                 white_clock_seconds=outcome.white_clock_seconds,
                 black_clock_seconds=outcome.black_clock_seconds,
             ))
+            if checkpoint is not None:
+                checkpoint(summarize_level(opponent_elo, records))
+
             print(
                 f"elo={opponent_elo} pair={pair_index}/{pair_count} "
                 f"proton={'white' if proton_is_white else 'black'} "
@@ -454,20 +571,7 @@ def run_level(
                 flush=True,
             )
 
-    wins = points.count(1.0)
-    draws = points.count(0.5)
-    losses = points.count(0.0)
-    score = statistics.fmean(points)
-    return MatchResult(
-        opponent_elo=opponent_elo,
-        games=len(points),
-        wins=wins,
-        draws=draws,
-        losses=losses,
-        score=score,
-        estimated_elo=logistic_elo(opponent_elo, score),
-        records=records,
-    )
+    return summarize_level(opponent_elo, records)
 
 
 def build_time_control(args: argparse.Namespace) -> TimeControl:
@@ -506,8 +610,10 @@ def main() -> int:
     openings = load_openings(openings_path)
     tool_path = Path(__file__).resolve()
     report = MatchReport(
-        schema_version=1,
+        schema_version=2,
+        status="running",
         created_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        completed_utc=None,
         seed=args.seed,
         requested_games_per_level=args.games,
         max_plies=args.max_plies,
@@ -536,17 +642,55 @@ def main() -> int:
             "UCI_LimitStrength": True,
             "UCI_Elo": list(args.opponent_elo),
         },
-        results=[
-            run_level(proton_path, stockfish_path, rating, openings, args, time_control)
-            for rating in args.opponent_elo
+        statistical_unit="one color-swapped opening pair",
+        opening_selection=(
+            "seeded sample without replacement until the opening suite is exhausted; "
+            "additional pairs use seeded draws with replacement"
+        ),
+        confidence_level=0.95,
+        confidence_reference="Hoeffding (1963), doi:10.1080/01621459.1963.10500830",
+        confidence_assumptions=[
+            "The Hoeffding radius is conservative for the seeded finite-population "
+            "sample without replacement used before suite exhaustion.",
+            "The two games within each color-swapped pair are not treated as independent.",
+            "Residual timing and shared-host effects are assumed not to induce "
+            "cross-pair dependence under the fixed protocol.",
+            "The bound describes expected score for this opening-selection protocol, "
+            "not a universal Elo rating.",
         ],
+        results=[],
     )
-    payload = asdict(report)
-    rendered = json.dumps(payload, indent=2)
+    json_path = args.json_path.resolve() if args.json_path else None
+    if json_path is not None:
+        write_json_atomic(json_path, asdict(report))
+
+    completed_results: list[MatchResult] = []
+    for rating in args.opponent_elo:
+        def checkpoint(partial: MatchResult) -> None:
+            report.results = [*completed_results, partial]
+            assert json_path is not None
+            write_json_atomic(json_path, asdict(report))
+
+        result = run_level(
+            proton_path,
+            stockfish_path,
+            rating,
+            openings,
+            args,
+            time_control,
+            checkpoint=checkpoint if json_path is not None else None,
+        )
+        completed_results.append(result)
+        report.results = list(completed_results)
+        if json_path is not None:
+            write_json_atomic(json_path, asdict(report))
+
+    report.status = "complete"
+    report.completed_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rendered = json.dumps(asdict(report), indent=2)
+    if json_path is not None:
+        write_json_atomic(json_path, asdict(report))
     print(rendered)
-    if args.json_path:
-        args.json_path.parent.mkdir(parents=True, exist_ok=True)
-        args.json_path.write_text(rendered + "\n", encoding="utf-8")
     return 0
 
 
