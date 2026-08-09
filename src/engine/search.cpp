@@ -758,19 +758,17 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
             [](const ScoredMove& lhs, const ScoredMove& rhs) { return lhs.score < rhs.score; });
         std::iter_swap(ordered.begin() + static_cast<std::ptrdiff_t>(move_index), best_candidate);
         const Move move = ordered[move_index].move;
-        if (!in_check && !move.is_promotion()) {
-            const int optimistic = stand_pat + captured_value(position, move) + 180;
-            if (optimistic <= alpha) continue;
-        }
-
         const int see = !in_check ? ordered[move_index].see : 0;
+        const bool delta_prunable =
+            !in_check && !move.is_promotion() &&
+            stand_pat + captured_value(position, move) + 180 <= alpha;
+        const bool pruning_candidate =
+            !in_check && !move.is_promotion() &&
+            (delta_prunable || see < 0);
+        if (pruning_candidate && !position.gives_check(move)) continue;
+
         UndoState undo;
         if (!position.make_move(move, undo)) continue;
-        const bool gives_check = position.in_check(position.side_to_move());
-        if (!in_check && !move.is_promotion() && !gives_check && see < 0) {
-            position.unmake_move(move, undo);
-            continue;
-        }
         ++legal_moves;
         move_stack_[ply] = move;
         moved_piece_stack_[ply] = position.piece_at(move.to);

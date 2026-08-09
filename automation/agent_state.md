@@ -2,13 +2,29 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T21:44:51+01:00`
+- Last run: `2026-08-10T00:02:35+01:00`
 - Status: `passed`
-- Change kept: own rook behind an unobstructed passed pawn
-- Active branch: `agent/eval-rook-passer`
-- Base: `origin/main` at `bec7218`
+- Change kept: preserve checking captures at the quiescence delta/SEE boundary
+- Active branch: `agent/qsearch-checking-captures`
+- Base: `origin/main` at `504100b`
 
 ## Latest evidence
+
+- Quiescence no longer discards a low-gain capture before determining whether it gives check. On `5bkb/7p/8/7Q/8/3B4/8/6K1 w - - 0 1`, old code returned the `+527` stand-pat under a deliberately high window; the candidate finds `Qxh7#` or `Bxh7#` at the exact `+31995` mate score from ply 4.
+- `Position::gives_check` reconstructs post-move occupancy and friendly attacker sets without mutating the position. It covers ordinary captures, source-vacation discoveries, en passant's off-destination victim, promotions, castling, king moves and destination reblocking. `make_move` remains authoritative for own-king legality.
+- Curated white/black en-passant, discovered-check, reblocking, promotion, castling and tactical fixtures plus 192 deterministic playout positions compare the prediction with real make/check/unmake results for every legal generated move. A direct qsearch regression proves a delta-prunable en-passant discovered check is searched.
+- The first safe implementation made every otherwise-pruned capture and cost `+5.306%` nodes and `+9.380%` median engine time. The kept pre-move predicate exactly matches that correct search tree on all 200 UHO positions while reducing its median time by `1.51%` in separate balanced-order trials.
+- Against merged main at depth 10, the kept candidate searched 55,926,703 versus 53,108,913 nodes (`+5.306%`). Median engine-reported time was 44,435 ms versus 42,870.5 ms (`+3.649%`). Best moves matched on 163/200 positions, scores on 66/200 and PVs on 53/200; the extra nodes are the cost of searching the newly preserved checking continuations.
+- The completed 400-game, 200-pair A/B scored 143 wins, 109 draws and 148 losses: `49.375%`, approximately `-4.34` Elo. The paired result is inconclusive (`p_gain=0.6410`, `p_regression=0.4049`; score interval `[0.39772, 0.58978]`) and does not establish a gain, regression or non-inferiority.
+- Final terminations were 291 checkmates, 76 threefold repetitions, 13 move-limit draws, 11 fifty-move draws and 9 insufficient-material draws. All 400 records, 200 pairs, totals and hashes recomputed with no illegal moves, flags, timeouts or protocol failures.
+- One full attempt stopped after 347 games and one isolated-opening reproduction stopped after 6 without a diagnostic. The isolated opening then completed 20/20 under a traceback wrapper. A separate 60-game retry was interrupted by the agent turn rather than either engine. All partials are preserved and excluded; the same original seed completed under the wrapper on the final retry.
+- The rebuilt validated executable has a different byte hash from the played candidate because production headers were recompiled after adding coverage and an API-contract comment. A fresh 200-position comparison matches the played candidate exactly on best move, score, depth, selective depth, nodes and PV.
+- Three independent reviews found no checking-predicate or qsearch semantic defect. Their requested en-passant qsearch, ordinary discovery, destination-reblocking and API-contract coverage was added.
+- Full validation passes: 7/7 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The Windows executable SHA-256 is `55cee06290e1f1f92ae28869484a9e1f5111b9871e5af8b97e145c5c57b2875f`; the certification manifest pins it.
+- This run keeps a tactical correctness repair. It does not claim statistically significant strength, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: rook support for passed pawns
 
 - An own rook with a clear same-file ray behind its passed pawn receives a deliberately small `+8` middlegame / `+18` endgame bonus. Rooks in front, beside the pawn, behind an enemy passer or separated by any blocker receive none.
 - Paired white/black evaluator fixtures isolate the 17 cp tapered increment in the test endgame and prove color and side-to-move symmetry. Front, blocked and enemy-rook negatives are covered.
@@ -222,9 +238,9 @@
 
 ## Next target
 
-- Preserve checking captures that currently fail qsearch delta pruning before their checking status is known, then screen the tactical gain and runtime cost separately.
 - Add a reproducible paired fixed-depth search comparison tool instead of relying on inline benchmark harnesses.
 - Add an explicit seeded alternative-selection opportunity rate so the 1200/1800/2400 modes can tune human-like error frequency independently from confirmed error size.
+- Continue bounded full-strength search/evaluation work only when deterministic screens justify the match cost.
 - Add singular extension only after explicitly tracking whether a TT move belongs to its stored value.
 - Calibrate advertised Elo modes only after full-strength search and evaluation changes settle.
 - Reserve the pinned `60+0.6`, 400-game Stockfish-3000 run for clean release candidates.
