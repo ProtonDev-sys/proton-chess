@@ -2,13 +2,29 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T18:48:17+01:00`
+- Last run: `2026-08-09T19:17:30+01:00`
 - Status: `passed`
-- Change kept: protect deep same-key transposition-table results from shallow writes
-- Active branch: `agent/search-strength-1`
-- Base: `origin/main` at `6d25433`
+- Change kept: reproducible symmetric candidate-versus-baseline runner
+- Active branch: `agent/generic-ab-runner`
+- Base: `origin/main` at `d2fe552`
 
 ## Latest evidence
+
+- Added `tools/compare_engines.py` for one candidate-versus-baseline comparison with candidate-relative records and no nominal opponent rating or fabricated absolute Elo.
+- The runner stages and verifies private copies of both executables and the opening suite, then uses only those immutable copies. Source changes during staging and staged changes during play fail the run.
+- Every game gets fresh candidate and baseline processes, identical explicit full-strength Proton options, the same deterministic per-game `HumanSeed`, and completed `ucinewgame`/`isready` handshakes before timing.
+- Opening selection depends only on the configured seed. Each selected opening is played candidate-white then candidate-black and treated as one statistical sample.
+- Atomic JSON begins in `running` state, checkpoints after every completed game, and records a final verdict only after the scheduled fixed sample completes. Running checkpoints cannot claim a gain or statistical significance.
+- The independent schema records requested and even scheduled game counts, alpha, both labels/identities/paths/hashes, exact options, seed derivation, opening/tool/shared-core hashes, host, clocks, moves, pair scores, pentanomial counts, conservative score bounds, exact sign-flip probabilities and relative Elo delta.
+- Candidate and baseline options must expose the same complete Proton control surface. A second-process launch failure closes the already-started first process.
+- Ten focused tests cover configuration symmetry, profile rejection, exact seeds, relative inference, multi-opening scheduling, role order, process cleanup, private staging, running/final report lifecycle, hashes and invalid inputs.
+- A real two-game smoke compared binary `1123e22a...c791e7` with `687e3175...78a28`. Both color-swapped games completed, both option maps matched exactly, and the final score was `1/2`; this is a lifecycle check, not strength evidence.
+- Full validation passes: 7/7 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The A/B tool SHA-256 is `654d619fb83087ec4fcd098304065413d2d7b783b3e9e35194518fd3e9ac2a88`. The imported match core remains `df6d62cf76bc3588b77177555c6ddd1234008aff49a5a1976308476bea9e26ee`, exactly matching the pinned certification runner.
+- The engine binary and certification manifest remain unchanged at `1123e22a742f70e18ba04012293f313ad17e62f70a4830ec91bd6b8e67c791e7`.
+- This run improves benchmark reproducibility. It does not claim an engine-strength gain, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: same-key transposition-table replacement
 
 - Same-key TT writes now update move ordering independently from value replacement. A shallow non-exact result cannot discard a result more than two plies deeper; exact and near-depth results retain the previous behavior.
 - Retained entries keep their score, static evaluation, depth and bound while refreshing their generation. A null move from a different-key bucket replacement now clears the evicted entry's unrelated move.
