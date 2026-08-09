@@ -317,6 +317,92 @@ bool Position::in_check(Color color) const {
     return square != NoSquare && is_square_attacked(square, opposite(color));
 }
 
+bool Position::gives_check(const Move& move) const {
+    if (move.is_null() || move.from >= 64 || move.to >= 64 || move.from == move.to) {
+        return false;
+    }
+
+    const Color us = stm_;
+    const Color them = opposite(us);
+    const Piece moving = board_[move.from];
+    if (moving == Empty || piece_color(moving) != us) return false;
+
+    int captured_square = move.to;
+    Piece captured = board_[captured_square];
+    if ((move.flags & MoveEnPassant) != 0) {
+        captured_square = us == White ? move.to - 8 : move.to + 8;
+        if (!attacks::on_board(captured_square) || board_[move.to] != Empty) {
+            return false;
+        }
+        captured = board_[captured_square];
+        if (captured != make_piece(them, Pawn)) return false;
+    } else if (captured != Empty && piece_color(captured) != them) {
+        return false;
+    }
+
+    Piece placed = moving;
+    if (move.is_promotion()) {
+        if (piece_type(moving) != Pawn || move.promotion < Knight ||
+            move.promotion > Queen) {
+            return false;
+        }
+        placed = make_piece(us, move.promotion);
+    }
+
+    Bitboard occupied = occupancy_all();
+    occupied &= ~bit(move.from);
+    if (captured != Empty) occupied &= ~bit(captured_square);
+    occupied |= bit(move.to);
+
+    Bitboard diagonal_sliders =
+        pieces_[make_piece(us, Bishop)] | pieces_[make_piece(us, Queen)];
+    Bitboard orthogonal_sliders =
+        pieces_[make_piece(us, Rook)] | pieces_[make_piece(us, Queen)];
+    Bitboard pawns = pieces_[make_piece(us, Pawn)];
+    Bitboard knights = pieces_[make_piece(us, Knight)];
+    Bitboard kings = pieces_[make_piece(us, King)];
+    diagonal_sliders &= ~bit(move.from);
+    orthogonal_sliders &= ~bit(move.from);
+    pawns &= ~bit(move.from);
+    knights &= ~bit(move.from);
+    kings &= ~bit(move.from);
+    if (piece_type(placed) == Bishop || piece_type(placed) == Queen) {
+        diagonal_sliders |= bit(move.to);
+    }
+    if (piece_type(placed) == Rook || piece_type(placed) == Queen) {
+        orthogonal_sliders |= bit(move.to);
+    }
+    if (piece_type(placed) == Pawn) pawns |= bit(move.to);
+    if (piece_type(placed) == Knight) knights |= bit(move.to);
+    if (piece_type(placed) == King) kings |= bit(move.to);
+
+    if (move.is_castle()) {
+        const bool king_side = (move.flags & MoveKingCastle) != 0;
+        const int rook_from = us == White
+            ? (king_side ? 7 : 0)
+            : (king_side ? 63 : 56);
+        const int rook_to = us == White
+            ? (king_side ? 5 : 3)
+            : (king_side ? 61 : 59);
+        if (piece_type(moving) != King ||
+            board_[rook_from] != make_piece(us, Rook)) {
+            return false;
+        }
+        occupied &= ~bit(rook_from);
+        occupied |= bit(rook_to);
+        orthogonal_sliders &= ~bit(rook_from);
+        orthogonal_sliders |= bit(rook_to);
+    }
+
+    const int enemy_king = king_square(them);
+    if (enemy_king == NoSquare) return false;
+    return (attacks::pawn(them, enemy_king) & pawns) != 0 ||
+           (attacks::Knight[enemy_king] & knights) != 0 ||
+           (attacks::King[enemy_king] & kings) != 0 ||
+           (attacks::bishop(enemy_king, occupied) & diagonal_sliders) != 0 ||
+           (attacks::rook(enemy_king, occupied) & orthogonal_sliders) != 0;
+}
+
 bool Position::has_non_pawn_material(Color color) const {
     const Piece knight = color == White ? WhiteKnight : BlackKnight;
     const Piece bishop = color == White ? WhiteBishop : BlackBishop;

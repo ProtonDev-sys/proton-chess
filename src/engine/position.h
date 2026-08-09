@@ -54,6 +54,9 @@ public:
 
     [[nodiscard]] bool is_square_attacked(int square, Color by) const;
     [[nodiscard]] bool in_check(Color color) const;
+    // Predicts the opponent's check state after a structurally valid pseudo-move.
+    // Own-king legality remains the responsibility of make_move().
+    [[nodiscard]] bool gives_check(const Move& move) const;
     [[nodiscard]] bool is_draw_by_material() const;
     [[nodiscard]] bool is_repetition(int required_occurrences = 3) const;
     [[nodiscard]] int king_square(Color color) const;

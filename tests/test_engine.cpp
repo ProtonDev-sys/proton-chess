@@ -71,6 +71,25 @@ struct SearchTestAccess {
         return search.confirm_human_candidate(position, candidate, depth);
     }
 
+    static int quiescence(Search& search, Position& position,
+                          int alpha, int beta, int ply) {
+        search.limits_ = SearchLimits{};
+        search.stop_requested_.store(false, std::memory_order_relaxed);
+        search.main_phase_ = false;
+        search.main_budget_exhausted_ = false;
+        search.has_hard_deadline_ = false;
+        search.has_main_deadline_ = false;
+        search.nodes_ = 0;
+        search.selective_depth_ = 0;
+        search.root_side_ = position.side_to_move();
+        for (int& length : search.pv_length_) length = 0;
+        return search.quiescence(position, alpha, beta, ply);
+    }
+
+    static std::vector<Move> pv(const Search& search, int ply) {
+        return search.current_pv(ply);
+    }
+
     static std::uint64_t nodes(const Search& search) { return search.nodes_; }
 };
 
@@ -255,6 +274,67 @@ void test_repetition_and_null_move() {
 
     for (const std::string& move : {"g1f3", "g8f6", "f3g1", "f6g8"}) apply(move);
     expect(position.is_repetition(3), "two cycles produce a threefold repetition");
+}
+
+void test_gives_check_prediction() {
+    const std::vector<std::pair<std::string, std::string>> fixtures = {
+        {"5bkb/7p/8/7Q/8/3B4/8/6K1 w - - 0 1", "checking captures"},
+        {"8/8/8/R2pP2k/8/8/8/7K w - d6 0 1", "en-passant discovered check"},
+        {"7k/8/8/8/r2Pp2K/8/8/8 b - d3 0 1", "black en-passant discovered check"},
+        {"4k3/8/8/2p5/4N3/8/8/4R1K1 w - - 0 1", "rook discovered check"},
+        {"6k1/8/1p6/3N4/8/8/B7/6K1 w - - 0 1", "bishop discovered check"},
+        {"4k3/8/8/4p3/4K3/8/8/4R3 w - - 0 1", "destination reblocks rook"},
+        {"8/7k/8/5Pp1/8/8/2B5/6K1 w - g6 0 1", "en-passant destination reblocks bishop"},
+        {"k7/6P1/8/8/8/8/8/K7 w - - 0 1", "checking promotions"},
+        {"5k2/8/8/8/8/8/8/4K2R w K - 0 1", "checking castle"},
+        {"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+         "kiwipete"},
+    };
+
+    const auto verify_position = [&](proton::Position& position,
+                                     const std::string& label) {
+        const std::string original_fen = position.fen();
+        const std::uint64_t original_key = position.key();
+        std::vector<proton::Move> pseudo;
+        position.generate_pseudo_moves(pseudo);
+        int legal_moves = 0;
+        for (const proton::Move& move : pseudo) {
+            const bool predicted = position.gives_check(move);
+            proton::UndoState undo;
+            if (!position.make_move(move, undo)) continue;
+            ++legal_moves;
+            const bool actual = position.in_check(position.side_to_move());
+            position.unmake_move(move, undo);
+            expect(predicted == actual,
+                   label + " predicts checking status for " + move.to_uci());
+        }
+        expect(legal_moves != 0, label + " gives-check fixture has legal moves");
+        expect(position.fen() == original_fen && position.key() == original_key,
+               label + " gives-check scan preserves position state");
+    };
+
+    for (const auto& [fen, label] : fixtures) {
+        proton::Position position;
+        expect(position.set_fen(fen), label + " gives-check FEN parses");
+        verify_position(position, label);
+    }
+
+    std::mt19937 random(0x43484543U);
+    for (int game = 0; game < 12; ++game) {
+        proton::Position position;
+        for (int ply = 0; ply < 16; ++ply) {
+            verify_position(position,
+                            "random gives-check game " + std::to_string(game) +
+                                " ply " + std::to_string(ply));
+            std::vector<proton::Move> legal;
+            position.generate_legal_moves(legal);
+            if (legal.empty()) break;
+            const proton::Move move = legal[random() % legal.size()];
+            proton::UndoState undo;
+            expect(position.make_move(move, undo),
+                   "random gives-check playout move makes");
+        }
+    }
 }
 
 void test_draw_material() {
@@ -1118,6 +1198,60 @@ void test_confirmation_node_cap() {
            "confirmation declines when the parent has no remaining node budget");
 }
 
+void test_qsearch_keeps_delta_pruned_checking_captures() {
+    proton::EngineOptions options;
+    options.use_book = false;
+    options.hash_mb = 1;
+    options.contempt_cp = 0;
+
+    proton::Evaluator evaluator;
+    evaluator.set_options(options);
+    proton::Search search(evaluator, options);
+
+    proton::Position position;
+    expect(position.set_fen(
+               "5bkb/7p/8/7Q/8/3B4/8/6K1 w - - 0 1"),
+           "checking-capture delta-pruning FEN parses");
+    constexpr int Ply = 4;
+    const int stand_pat = evaluator.evaluate(position);
+    const int alpha = stand_pat + proton::piece_value(proton::Pawn) + 180;
+    const std::uint64_t original_key = position.key();
+    const int score = proton::SearchTestAccess::quiescence(
+        search, position, alpha, alpha + 1, Ply);
+    expect(score == proton::Search::mate_score() - Ply - 1,
+           "qsearch preserves a delta-prunable checking mate (got " +
+               std::to_string(score) + ")");
+
+    const std::vector<proton::Move> pv =
+        proton::SearchTestAccess::pv(search, Ply);
+    expect(pv.size() == 1 &&
+               (pv.front().to_uci() == "h5h7" ||
+                pv.front().to_uci() == "d3h7"),
+           "qsearch PV contains the checking mate");
+    expect(proton::SearchTestAccess::nodes(search) >= 2,
+           "checking-mate qsearch enters the preserved tactical line (got " +
+               std::to_string(proton::SearchTestAccess::nodes(search)) + ")");
+    expect(position.key() == original_key,
+           "pre-move check prediction preserves position state");
+
+    proton::Search ep_search(evaluator, options);
+    proton::Position ep_position;
+    expect(ep_position.set_fen(
+               "8/8/8/R2pP2k/8/8/8/7K w - d6 0 1"),
+           "qsearch en-passant discovered-check FEN parses");
+    const std::string ep_fen = ep_position.fen();
+    const std::uint64_t ep_key = ep_position.key();
+    const int ep_stand_pat = evaluator.evaluate(ep_position);
+    const int ep_alpha =
+        ep_stand_pat + proton::piece_value(proton::Pawn) + 180;
+    static_cast<void>(proton::SearchTestAccess::quiescence(
+        ep_search, ep_position, ep_alpha, ep_alpha + 1, Ply));
+    expect(proton::SearchTestAccess::nodes(ep_search) >= 2,
+           "qsearch enters a delta-prunable en-passant discovered check");
+    expect(ep_position.fen() == ep_fen && ep_position.key() == ep_key,
+           "en-passant checking-capture qsearch preserves position state");
+}
+
 }  // namespace
 
 int main() {
@@ -1138,6 +1272,7 @@ int main() {
     test_special_moves();
     test_fen_and_ep_hashing();
     test_repetition_and_null_move();
+    test_gives_check_prediction();
     test_draw_material();
     test_pawn_safe_minor_mobility();
     test_rook_behind_passed_pawn();
@@ -1146,6 +1281,7 @@ int main() {
     test_search_tactics();
     test_tt_same_key_replacement();
     test_confirmation_node_cap();
+    test_qsearch_keeps_delta_pruned_checking_captures();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
