@@ -72,5 +72,18 @@ if(PROTON_BUILD_TESTS)
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/uci_smoke.py
                          $<TARGET_FILE:proton_chess>)
         set_tests_properties(proton-uci-smoke PROPERTIES TIMEOUT 20)
+
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import chess"
+            RESULT_VARIABLE PROTON_PYTHON_CHESS_AVAILABLE
+            OUTPUT_QUIET ERROR_QUIET)
+        if(PROTON_PYTHON_CHESS_AVAILABLE EQUAL 0)
+            add_test(NAME proton-match-tool-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_estimate_elo.py)
+            set_tests_properties(proton-match-tool-tests PROPERTIES TIMEOUT 20)
+        else()
+            message(STATUS "python-chess not found; match-tool tests are disabled")
+        endif()
     endif()
 endif()
