@@ -115,6 +115,21 @@ def main() -> int:
         assert after_invalid == expected, after_invalid
 
         engine.send("position startpos")
+        engine.send("moves")
+        engine.send("isready")
+        _, move_lines = engine.wait_for(lambda line: line == "readyok")
+        legal_moves = sorted(line for line in move_lines if len(line) in (4, 5))
+        assert legal_moves == [
+            "a2a3", "a2a4", "b1a3", "b1c3", "b2b3", "b2b4", "c2c3", "c2c4",
+            "d2d3", "d2d4", "e2e3", "e2e4", "f2f3", "f2f4", "g1f3", "g1h3",
+            "g2g3", "g2g4", "h2h3", "h2h4",
+        ], legal_moves
+
+        engine.send("perft 2")
+        perft_line, _ = engine.wait_for(lambda line: line.startswith("info string perft "))
+        assert "depth 2 nodes 400 " in perft_line, perft_line
+
+        engine.send("position startpos")
         engine.send("go depth 4 searchmoves e2e4")
         bestmove, _ = engine.wait_for(lambda line: line.startswith("bestmove "), timeout=10)
         assert bestmove.split()[1] == "e2e4", bestmove
