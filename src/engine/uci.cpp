@@ -219,19 +219,15 @@ void UciLoop::handle_setoption(const std::string& line) {
     } else if (key == "bookrandomness" && parse_int(value, number)) {
         options_.book_randomness = std::clamp(number, 0, 100);
     } else if (key == "uci_limitstrength") {
-        options_.human_style = lower_value == "true" || lower_value == "1";
+        options_.uci_limit_strength = lower_value == "true" || lower_value == "1";
     } else if (key == "uci_elo" && parse_int(value, number)) {
-        const int elo = std::clamp(number, 800, 2800);
-        options_.human_skill = std::clamp((elo - 800) / 100, 0, 20);
-        options_.human_max_loss_cp = std::clamp((2800 - elo) / 8, 8, 250);
+        options_.uci_elo = std::clamp(number, 800, 2800);
     } else if (key == "skill level" && parse_int(value, number)) {
         options_.human_skill = std::clamp(number, 0, 20);
-        options_.human_style = options_.human_skill < 20;
     } else if (key == "humanstyle") {
         options_.human_style = lower_value == "true" || lower_value == "1";
     } else if (key == "humanskill" && parse_int(value, number)) {
         options_.human_skill = std::clamp(number, 0, 20);
-        options_.human_style = true;
     } else if (key == "humanmaxlosscp" && parse_int(value, number)) {
         options_.human_max_loss_cp = std::clamp(number, 0, 500);
     } else if (key == "moveoverhead" && parse_int(value, number)) {

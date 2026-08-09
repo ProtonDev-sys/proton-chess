@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <random>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,8 @@ struct SearchLimits {
     bool ponder = false;
     bool search_moves_specified = false;
     std::vector<Move> search_moves;
+    const std::atomic<bool>* external_stop = nullptr;
+    const std::chrono::steady_clock::time_point* external_deadline = nullptr;
 };
 
 struct SearchInfo {
@@ -55,7 +58,8 @@ public:
     using InfoCallback = std::function<void(const SearchInfo&)>;
     using StartCallback = std::function<void()>;
 
-    explicit Search(Evaluator& evaluator);
+    explicit Search(Evaluator& evaluator,
+                    const EngineOptions& initial_options = EngineOptions{});
 
     void set_options(const EngineOptions& options);
     void new_game();
@@ -166,6 +170,7 @@ private:
     std::unordered_map<std::uint64_t, std::vector<BookMove>> book_{};
     std::mt19937_64 random_{};
     Color root_side_ = White;
+    bool verification_search_ = false;
 
     void resize_hash(int megabytes);
     void clear_hash();
@@ -223,6 +228,8 @@ private:
     [[nodiscard]] Move select_human_move(const Position& position,
                                          std::vector<RootMove>& root_moves,
                                          int completed_depth);
+    [[nodiscard]] std::optional<SearchResult> confirm_human_candidate(
+        const Position& position, const Move& candidate, int completed_depth);
 
     [[nodiscard]] int draw_score(const Position& position) const;
     [[nodiscard]] int rule50_score(Position& position, int ply, bool in_check);

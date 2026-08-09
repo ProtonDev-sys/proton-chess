@@ -2,13 +2,28 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T07:18:42+01:00`
+- Last run: `2026-08-09T16:08:29+01:00`
 - Status: `passed`
-- Change kept: pinned Stockfish-3000 certification inputs, FEN starts, and raw-record result verification
-- Active branch: `agent/pinned-stockfish3000-protocol`
-- Base: `origin/main` at `2294ac8`
+- Change kept: order-stable limiter options and proof-checked human move selection
+- Active branch: `agent/human-limiter-correctness`
+- Base: `origin/main` at `4f21a43`
 
 ## Latest evidence
+
+- `UCI_LimitStrength` and `UCI_Elo` now have independent state. Setting either no longer overwrites custom human-style options; `HumanSkill` and `Skill Level` no longer toggle a separate Boolean.
+- Replaying every advertised UCI default used to change startpos depth-4 play from `b1c3` to `g1f3`. Fresh defaults, replayed defaults, a `HumanSkill` 0-to-20 round trip and disabled `UCI_Elo=800` now all return `b1c3` with seed 27.
+- Non-best candidates first pass a TT-independent narrow filter. A sampled alternative is returned only after a fresh isolated 1 MB search completes the same depth with `searchmoves` and confirms `score >= best - allowance`. The verifier shares the parent stop, hard deadline and remaining node budget.
+- On `3rk3/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 w - - 0 1`, the old Elo-800 selector chose `a3`: independent depth-4 scores were `+677` for `Qa7` and `-595` for `a3`, a 1,272 cp loss against a 700 cp allowance. Seed 27 now chooses `Qe4`, independently scored `+659`, an 18 cp loss.
+- Five pinned seeds all choose an independently verified move within the 700 cp band. A 3,450-node interruption reaches the limit and falls back to a verified in-band move.
+- A tighter Elo-2700 regression previously approved a 52 cp loss against a 22 cp allowance. Fresh confirmation rejects that move and returns the best line.
+- Limited timed play skips the full-strength opening-book shortcut. Full-strength book behavior is unchanged.
+- Hash-1 and Hash-64 audits each checked 500 Elo-2700 decisions across 100 positions and five seeds: 45 alternatives, zero violations, and a worst accepted loss exactly on the 22 cp boundary.
+- Across 100 positions with zero move overhead, 10 ms searches topped at 10.88 ms and 50 ms searches at 50.99 ms. Sampled fixed-depth median overhead was 1.35x to 1.52x through depth 10; the worst case was 3.51x.
+- The new Windows executable SHA-256 is `c3a787a2a5aa8e503974d140c2e9a34583b69d07d6e11961c1426c2d0672d4d8`; the certification manifest pins it.
+- Full canonical validation passes: 6/6 CTest targets, 5/5 perft cases, and 49/49 move-generation positions.
+- This run fixes limiter correctness. It does not claim calibrated Elo or increased full strength.
+
+## Previous run: pinned certification protocol
 
 - The certification source is official-stockfish/books commit `65815cc`. The CC0 `UHO_Lichess_4852_v1.epd` archive, extracted EPD, SRI and position count were verified before derivation.
 - The source contains 2,632,036 legal non-terminal positions. A fixed content-hash ranking selects 200 positions; a full 8m36 legality scan and the optimized 2.9-second candidate-first generator selected identical FENs.

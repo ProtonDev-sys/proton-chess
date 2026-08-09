@@ -22,6 +22,8 @@ struct EngineOptions {
     bool use_book = true;
     std::string book_file = "openings/book_lines.txt";
     int book_randomness = 0;       // 0 = best-weight line, 100 = full weighted variety.
+    bool uci_limit_strength = false;
+    int uci_elo = 2800;
     bool human_style = false;
     int human_skill = 20;          // 0..20. 20 only varies between near-equal moves.
     int human_max_loss_cp = 12;    // Maximum intentional loss at skill 20.
