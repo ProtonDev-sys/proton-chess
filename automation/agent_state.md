@@ -2,13 +2,27 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T19:17:30+01:00`
+- Last run: `2026-08-09T19:44:03+01:00`
 - Status: `passed`
-- Change kept: reproducible symmetric candidate-versus-baseline runner
-- Active branch: `agent/generic-ab-runner`
-- Base: `origin/main` at `d2fe552`
+- Change kept: exact node caps and stop-aware re-search propagation
+- Active branch: `agent/verifier-node-cap-2`
+- Base: `origin/main` at `54168b0`
 
 ## Latest evidence
+
+- A sticky node/main-budget stop is now checked before every possible follow-up search: razoring continuation, deep null verification, ProbCut confirmation, LMR/PVS re-search and root PVS re-search.
+- The child verifier receives the parent's exact remaining node budget. Any unexpected child overrun is rejected and the public parent count saturates at its cap rather than admitting a candidate or reporting an overrun.
+- The focused restricted start-position search for `c2c4` at depth 8 now stops incomplete at exactly 4,000 nodes. The parent fixture begins at 100/4,100 nodes, spends the reserve and returns incomplete at exactly 4,100. Old code reports 4,001 and 4,101 respectively.
+- A parent with zero remaining nodes declines confirmation without changing its counter.
+- The existing full-strength 6,000-node fixture keeps `Qa7` at depth 5 but now reports exactly 6,000 rather than the historical 6,001. Elo 3000 still matches full strength.
+- Across all 200 pinned UHO positions at 6,000 nodes, candidate and baseline matched 200/200 on completed best move, depth, score and PV.
+- A symmetric 20-game timed smoke completed with no illegal moves, flags or timeouts. The candidate scored 8 wins, 3 draws and 9 losses (`47.5%`); the fixed-sample result is inconclusive and is not a strength claim.
+- Independent audits verified every recursive continuation site and found no remaining stop-propagation gap or false-acceptance path.
+- Full validation passes: 7/7 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The Windows executable SHA-256 is `44d047da7d5bf143456aea86ab2d8b1e408f2b1ec6e54c8586847717e868775d`; the certification manifest pins it.
+- This run fixes bounded-search correctness without changing completed fixed-node choices in the 200-position scan. It does not claim increased strength, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: symmetric candidate-versus-baseline runner
 
 - Added `tools/compare_engines.py` for one candidate-versus-baseline comparison with candidate-relative records and no nominal opponent rating or fabricated absolute Elo.
 - The runner stages and verifies private copies of both executables and the opening suite, then uses only those immutable copies. Source changes during staging and staged changes during play fail the run.

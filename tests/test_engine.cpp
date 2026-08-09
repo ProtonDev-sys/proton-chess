@@ -57,6 +57,21 @@ struct SearchTestAccess {
             entry->move,
         };
     }
+
+    static void set_confirmation_budget(Search& search, std::uint64_t limit,
+                                        std::uint64_t already_used) {
+        search.limits_ = SearchLimits{};
+        search.limits_.node_limit = limit;
+        search.nodes_ = already_used;
+        search.stop_requested_.store(false, std::memory_order_relaxed);
+    }
+
+    static std::optional<SearchResult> confirm_candidate(
+        Search& search, const Position& position, const Move& candidate, int depth) {
+        return search.confirm_human_candidate(position, candidate, depth);
+    }
+
+    static std::uint64_t nodes(const Search& search) { return search.nodes_; }
 };
 
 }  // namespace proton
@@ -621,8 +636,8 @@ void test_search_tactics() {
     const proton::SearchResult full_node_result =
         full_node_search->think(full_node_position, full_node_limits);
     expect(full_node_result.best.to_uci() == "d4a7" && full_node_result.depth == 5 &&
-               full_node_result.nodes == full_node_limits.node_limit + 1,
-           "full-strength node-limited search is unchanged (move " +
+               full_node_result.nodes == full_node_limits.node_limit,
+           "full-strength search respects the exact node cap (move " +
                full_node_result.best.to_uci() + ", depth " +
                std::to_string(full_node_result.depth) + ", nodes " +
                std::to_string(full_node_result.nodes) + ")");
@@ -906,6 +921,56 @@ void test_tt_same_key_replacement() {
            "different-key replacement clears an unrelated TT move");
 }
 
+void test_confirmation_node_cap() {
+    proton::EngineOptions options;
+    options.use_book = false;
+    options.hash_mb = 1;
+    proton::Evaluator evaluator;
+    evaluator.set_options(options);
+    auto search = std::make_unique<proton::Search>(evaluator, options);
+    proton::Position position;
+    const proton::Move candidate = position.parse_uci_move("c2c4");
+    expect(!candidate.is_null(), "confirmation node-cap candidate parses");
+
+    proton::Evaluator child_evaluator;
+    child_evaluator.set_options(options);
+    auto child_search =
+        std::make_unique<proton::Search>(child_evaluator, options);
+    proton::SearchLimits child_limits;
+    child_limits.depth = 8;
+    child_limits.node_limit = 4000;
+    child_limits.search_moves_specified = true;
+    child_limits.search_moves.push_back(candidate);
+    const proton::SearchResult child_result =
+        child_search->think(position, child_limits);
+    expect(child_result.nodes == child_limits.node_limit && child_result.depth < 8,
+           "restricted child itself stops exactly at its node cap");
+
+    constexpr std::uint64_t TotalNodes = 4100;
+    constexpr std::uint64_t AlreadyUsed = 100;
+    proton::SearchTestAccess::set_confirmation_budget(
+        *search, TotalNodes, AlreadyUsed);
+    const std::optional<proton::SearchResult> result =
+        proton::SearchTestAccess::confirm_candidate(
+            *search, position, candidate, 8);
+    expect(!result.has_value(),
+           "node-capped confirmation does not report an incomplete search");
+    expect(proton::SearchTestAccess::nodes(*search) == TotalNodes,
+           "child confirmation exhausts work inside the parent node cap (nodes " +
+               std::to_string(proton::SearchTestAccess::nodes(*search)) + ")");
+
+    auto no_room_search =
+        std::make_unique<proton::Search>(evaluator, options);
+    proton::SearchTestAccess::set_confirmation_budget(
+        *no_room_search, AlreadyUsed, AlreadyUsed);
+    const std::optional<proton::SearchResult> no_room_result =
+        proton::SearchTestAccess::confirm_candidate(
+            *no_room_search, position, candidate, 8);
+    expect(!no_room_result.has_value() &&
+               proton::SearchTestAccess::nodes(*no_room_search) == AlreadyUsed,
+           "confirmation declines when the parent has no remaining node budget");
+}
+
 }  // namespace
 
 int main() {
@@ -931,6 +996,7 @@ int main() {
     test_static_exchange();
     test_search_tactics();
     test_tt_same_key_replacement();
+    test_confirmation_node_cap();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

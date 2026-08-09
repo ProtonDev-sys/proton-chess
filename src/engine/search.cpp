@@ -904,6 +904,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         // without a tactical move, which quiescence will still examine.
         if (depth <= 2 && pruning_eval + 180 + depth * 110 <= alpha) {
             const int razor = quiescence(position, alpha, beta, ply);
+            if (search_aborted()) return alpha;
             if (razor <= alpha) return razor;
         }
 
@@ -931,6 +932,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
             if (depth < 9) return null_score;
             const int verification = alpha_beta(position, depth - reduction, beta - 1, beta,
                                                 ply, false, false, false, previous_move);
+            if (search_aborted()) return alpha;
             if (verification >= beta) return null_score;
         }
     }
@@ -962,7 +964,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
             move_stack_[ply] = move;
             moved_piece_stack_[ply] = position.piece_at(move.to);
             int score = -quiescence(position, -probcut_beta, -probcut_beta + 1, ply + 1);
-            if (score >= probcut_beta) {
+            if (!search_aborted() && score >= probcut_beta) {
                 score = -alpha_beta(position, depth - 4, -probcut_beta,
                                     -probcut_beta + 1, ply + 1,
                                     false, true, true, move);
@@ -1064,11 +1066,11 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
 
             score = -alpha_beta(position, new_depth - reduction, -alpha - 1, -alpha,
                                 ply + 1, false, true, true, move);
-            if (score > alpha && reduction > 0) {
+            if (!search_aborted() && score > alpha && reduction > 0) {
                 score = -alpha_beta(position, new_depth, -alpha - 1, -alpha,
                                     ply + 1, false, !cut_node, true, move);
             }
-            if (score > alpha && score < beta) {
+            if (!search_aborted() && score > alpha && score < beta) {
                 score = -alpha_beta(position, new_depth, -beta, -alpha,
                                     ply + 1, pv_node, false, true, move);
             }
@@ -1150,7 +1152,7 @@ int Search::search_root(Position& position, std::vector<RootMove>& root_moves,
         } else {
             score = -alpha_beta(position, depth - 1, -alpha - 1, -alpha, 1,
                                 false, true, true, root_move.move);
-            if (score > alpha && score < beta) {
+            if (!search_aborted() && score > alpha && score < beta) {
                 score = -alpha_beta(position, depth - 1, -beta, -alpha, 1,
                                     true, false, true, root_move.move);
                 exact_score = true;
@@ -1319,19 +1321,21 @@ std::optional<SearchResult> Search::confirm_human_candidate(
     if (verifier_deadline.has_value()) {
         verifier_limits.external_deadline = &*verifier_deadline;
     }
+    std::uint64_t verifier_node_budget = 0;
     if (limits_.node_limit != 0) {
-        const std::uint64_t remaining = limits_.node_limit -
+        verifier_node_budget = limits_.node_limit -
             std::min(nodes_, limits_.node_limit);
-        // A stopped child can report one node beyond its local UCI cap. Keep
-        // that historical convention inside the parent's absolute budget.
-        if (remaining <= 1) return std::nullopt;
-        verifier_limits.node_limit = remaining - 1;
+        if (verifier_node_budget == 0) return std::nullopt;
+        verifier_limits.node_limit = verifier_node_budget;
     }
 
     SearchResult result = verifier.think(position, verifier_limits);
-    nodes_ += result.nodes;
+    const bool verifier_overran_parent = verifier_node_budget != 0 &&
+        result.nodes > verifier_node_budget;
+    nodes_ += verifier_overran_parent ? verifier_node_budget : result.nodes;
     selective_depth_ = std::max(selective_depth_, result.selective_depth);
-    if (should_stop(true) || result.depth != completed_depth ||
+    if (verifier_overran_parent || should_stop(true) ||
+        result.depth != completed_depth ||
         result.best != candidate) {
         return std::nullopt;
     }
