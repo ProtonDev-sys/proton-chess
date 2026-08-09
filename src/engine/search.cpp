@@ -301,6 +301,11 @@ bool Search::should_stop(bool force_time_check) {
         stop_requested_.store(true, std::memory_order_relaxed);
         return true;
     }
+    if (limits_.secondary_external_stop != nullptr &&
+        limits_.secondary_external_stop->load(std::memory_order_relaxed)) {
+        stop_requested_.store(true, std::memory_order_relaxed);
+        return true;
+    }
     if (limits_.external_deadline != nullptr &&
         std::chrono::steady_clock::now() >= *limits_.external_deadline) {
         stop_requested_.store(true, std::memory_order_relaxed);
@@ -1263,7 +1268,17 @@ std::optional<SearchResult> Search::confirm_human_candidate(
     verifier_limits.search_moves_specified = true;
     verifier_limits.search_moves.push_back(candidate);
     verifier_limits.external_stop = &stop_requested_;
-    if (has_hard_deadline_) verifier_limits.external_deadline = &hard_deadline_;
+    verifier_limits.secondary_external_stop = limits_.external_stop;
+    std::optional<std::chrono::steady_clock::time_point> verifier_deadline;
+    if (has_hard_deadline_) verifier_deadline = hard_deadline_;
+    if (limits_.external_deadline != nullptr &&
+        (!verifier_deadline.has_value() ||
+         *limits_.external_deadline < *verifier_deadline)) {
+        verifier_deadline = *limits_.external_deadline;
+    }
+    if (verifier_deadline.has_value()) {
+        verifier_limits.external_deadline = &*verifier_deadline;
+    }
     if (limits_.node_limit != 0) {
         if (nodes_ >= limits_.node_limit) return std::nullopt;
         verifier_limits.node_limit = limits_.node_limit - nodes_;

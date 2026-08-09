@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -403,6 +404,21 @@ void test_search_tactics() {
            "loss-band verification reaches the cancellation node limit");
     expect(full_result.score_cp - exact_score_for(interrupted_result.best) <= 700,
            "an interrupted verification never admits an out-of-band move");
+
+    std::atomic<bool> primary_stop{false};
+    std::atomic<bool> secondary_stop{true};
+    proton::Evaluator dual_stop_evaluator;
+    dual_stop_evaluator.set_options(full_options);
+    proton::Search dual_stop_search(dual_stop_evaluator, full_options);
+    proton::Position dual_stop_position;
+    expect(dual_stop_position.set_fen(loss_band_fen), "dual-stop FEN parses");
+    proton::SearchLimits dual_stop_limits = loss_band_limits;
+    dual_stop_limits.external_stop = &primary_stop;
+    dual_stop_limits.secondary_external_stop = &secondary_stop;
+    const proton::SearchResult dual_stop_result =
+        dual_stop_search.think(dual_stop_position, dual_stop_limits);
+    expect(dual_stop_result.depth == 0 && dual_stop_result.nodes == 0,
+           "either external cancellation source stops a nested search");
 
     const std::string tight_band_fen =
         "1rbqk2r/pp2ppbp/2p2np1/3p4/3P4/P1NBP3/1PP2PPP/R2QK1NR b KQk - 2 7";

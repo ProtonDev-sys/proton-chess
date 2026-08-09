@@ -28,6 +28,7 @@ struct SearchLimits {
     bool search_moves_specified = false;
     std::vector<Move> search_moves;
     const std::atomic<bool>* external_stop = nullptr;
+    const std::atomic<bool>* secondary_external_stop = nullptr;
     const std::chrono::steady_clock::time_point* external_deadline = nullptr;
 };
 
