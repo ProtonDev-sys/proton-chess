@@ -2,13 +2,28 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-10T00:02:35+01:00`
+- Last run: `2026-08-10T00:30:58+01:00`
 - Status: `passed`
-- Change kept: preserve checking captures at the quiescence delta/SEE boundary
-- Active branch: `agent/qsearch-checking-captures`
-- Base: `origin/main` at `504100b`
+- Change kept: reproducible paired fixed-search comparison tooling
+- Active branch: `agent/paired-search-compare`
+- Base: `origin/main` at `44873f2`
 
 ## Latest evidence
+
+- Added `tools/compare_search.py` for hash-pinned candidate-versus-baseline UCI screens at fixed depth or a fixed requested node cap. It stages private copies of both binaries and the opening suite, rejects identical binaries, records source and tool hashes, and re-verifies every input after the run.
+- Each trial uses fresh engine processes with the same explicit full-strength options. Every FEN is preceded by `ucinewgame` and `isready`, then round-tripped through Proton's `d` command before timing. Candidate-first order flips by position and trial.
+- Queue-backed output readers enforce real Windows deadlines without blocking on `readline`; stderr is drained through the same pipe. Failures and interruptions retain atomic JSON checkpoints with the active engine, trial and position. Cleanup attempts both engines even if the first close fails.
+- Rows validate the exact requested depth, legal best move, legal reported PV, score type/bound, metrics, ponder move and fixed-node cap. Best move, ponder, score, depth, selective depth, reported nodes and PV must repeat across trials; timing and NPS are deliberately excluded from semantic equality.
+- Fixed-node reports label `info nodes` as the last completed iteration rather than total budget consumption and omit node-efficiency deltas. Fixed-depth node comparisons carry an explicit unchanged-accounting caveat.
+- The clean depth-8 run compared all 200 pinned UHO positions twice for 400 paired searches. Both binaries were internally deterministic. The current engine used 26,058,884 nodes versus 25,285,012 for pre-qsearch main (`+3.061%`); best moves matched 358/400, scores 270/400 and PVs 250/400. This confirms the known qsearch behavior difference and exercises the tool; it is not a new performance claim.
+- The clean 25,000-node-cap run also completed 400 paired searches with repeatable results. Best moves matched 380/400, scores 336/400 and PVs 328/400. No reported completed iteration exceeded the requested cap, and the report publishes no node-saving percentage.
+- The depth report SHA-256 is `cd80a6ded411d17628d04308d1e71484d66b8f3e38e3dac861ca04c1cac88f41`; the fixed-node report is `1779d24d4929522b847df0a4b394f524892331f09bae6c43925330ec91ca600e`. Both record clean revision `6b3467590f2810ed67b5910640aa936ab8729d97` and `git_dirty=false`.
+- Thirteen focused regressions cover inputs, CLI bounds, malformed UCI output, FEN round trips, legal PVs, real timeouts, balanced ordering, repeatability, node semantics, atomic writes, failed checkpoints, cleanup and broken stdout pipes. Two independent final reviews found no blocker.
+- Full validation passes: 8/8 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The comparator SHA-256 is `6f2250d1b95624e0a29295f15fba4e2b530ab04ed36fac7488da81b308ec8d1b`. The engine remains `55cee06290e1f1f92ae28869484a9e1f5111b9871e5af8b97e145c5c57b2875f`; the pinned certification runner remains `df6d62cf76bc3588b77177555c6ddd1234008aff49a5a1976308476bea9e26ee`.
+- This run improves search-experiment reproducibility. It does not claim increased strength, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: quiescence checking captures
 
 - Quiescence no longer discards a low-gain capture before determining whether it gives check. On `5bkb/7p/8/7Q/8/3B4/8/6K1 w - - 0 1`, old code returned the `+527` stand-pat under a deliberately high window; the candidate finds `Qxh7#` or `Bxh7#` at the exact `+31995` mate score from ply 4.
 - `Position::gives_check` reconstructs post-move occupancy and friendly attacker sets without mutating the position. It covers ordinary captures, source-vacation discoveries, en passant's off-destination victim, promotions, castling, king moves and destination reblocking. `make_move` remains authoritative for own-king legality.
@@ -238,7 +253,6 @@
 
 ## Next target
 
-- Add a reproducible paired fixed-depth search comparison tool instead of relying on inline benchmark harnesses.
 - Add an explicit seeded alternative-selection opportunity rate so the 1200/1800/2400 modes can tune human-like error frequency independently from confirmed error size.
 - Continue bounded full-strength search/evaluation work only when deterministic screens justify the match cost.
 - Add singular extension only after explicitly tracking whether a TT move belongs to its stored value.

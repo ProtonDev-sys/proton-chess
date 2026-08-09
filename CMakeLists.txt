@@ -98,6 +98,10 @@ if(PROTON_BUILD_TESTS)
                      COMMAND ${Python3_EXECUTABLE}
                              ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compare_engines.py)
             set_tests_properties(proton-ab-tool-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-search-compare-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compare_search.py)
+            set_tests_properties(proton-search-compare-tests PROPERTIES TIMEOUT 20)
         else()
             message(STATUS "python-chess not found; match-tool tests are disabled")
         endif()
