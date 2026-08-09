@@ -20,7 +20,7 @@
 - At 50 ms over the first 30 positions and five seeds, Elo 800 selected 118/150 alternatives and Elo 2700 selected 7/150, again with zero loss-band violations. Median wall times were 33.72 ms and 28.02 ms; the 95th percentiles were 50.28 ms and 43.10 ms.
 - Full strength and Elo 3000 matched exactly on best move, completed main depth, main nodes, score and PV across the first 100 UHO positions at 6,000 nodes.
 - Full validation passes: 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
-- The Windows executable SHA-256 is `550cd58baf9ffd42279d92f4def94b3e07ba410dc79b1af89f65b507e7dfcf73`; the certification manifest pins it.
+- The Windows executable SHA-256 is `687e31758ba3f4a31a2a0bc74eedee68548adeca602fa7aa500b221a11578a28`; the certification manifest pins it.
 - This run makes bounded limiting effective and fail-closed. It does not claim calibrated Elo or increased full strength.
 
 ## Previous run: Elo 3000 control and calibration tooling

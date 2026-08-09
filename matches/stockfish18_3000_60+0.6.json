@@ -53,7 +53,7 @@
   },
   "proton": {
     "name": "Proton Chess",
-    "binary_sha256": "550cd58baf9ffd42279d92f4def94b3e07ba410dc79b1af89f65b507e7dfcf73"
+    "binary_sha256": "687e31758ba3f4a31a2a0bc74eedee68548adeca602fa7aa500b221a11578a28"
   },
   "proton_options": {
     "Hash": 64,

@@ -1479,6 +1479,8 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     selection_budget_reserved_ = main_phase_ &&
         (main_node_limit_ != 0 || hard_time_budget_ms_ > 0);
     main_phase_ = selection_budget_reserved_;
+    // configure_time() may have created this from the provisional main phase.
+    if (!selection_budget_reserved_) has_main_deadline_ = false;
     ++generation_;
     if (generation_ == 0) ++generation_;
 

@@ -645,7 +645,8 @@ void test_search_tactics() {
     expect(confirmation_tight_result.depth == 6 &&
                confirmation_tight_result.best == confirmation_full_result.best,
            "exhausted confirmation falls back to the completed root best");
-    expect(confirmation_tight_result.nodes > confirmation_full_result.nodes &&
+    expect(confirmation_tight_result.nodes >
+               confirmation_tight_limits.node_limit / 2 &&
                confirmation_tight_result.nodes <= confirmation_tight_limits.node_limit,
            "cancelled confirmation stays inside the parent's total node budget");
 
