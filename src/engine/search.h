@@ -27,8 +27,7 @@ struct SearchLimits {
     bool ponder = false;
     bool search_moves_specified = false;
     std::vector<Move> search_moves;
-    const std::atomic<bool>* external_stop = nullptr;
-    const std::atomic<bool>* secondary_external_stop = nullptr;
+    std::vector<const std::atomic<bool>*> external_stops;
     const std::chrono::steady_clock::time_point* external_deadline = nullptr;
 };
 
@@ -145,11 +144,17 @@ private:
     std::chrono::steady_clock::time_point start_time_{};
     std::chrono::steady_clock::time_point soft_deadline_{};
     std::chrono::steady_clock::time_point hard_deadline_{};
+    std::chrono::steady_clock::time_point main_deadline_{};
     bool has_soft_deadline_ = false;
     bool has_hard_deadline_ = false;
+    bool has_main_deadline_ = false;
     bool ponder_time_activated_ = false;
     int soft_time_budget_ms_ = 0;
     int hard_time_budget_ms_ = 0;
+    std::uint64_t main_node_limit_ = 0;
+    bool main_phase_ = false;
+    bool main_budget_exhausted_ = false;
+    bool selection_budget_reserved_ = false;
 
     std::array<std::array<Move, 2>, MaxPly> killers_{};
     std::array<std::array<std::array<int, 64>, 64>, 2> history_{};
@@ -188,6 +193,7 @@ private:
     void activate_time_budget(std::chrono::steady_clock::time_point now);
     void activate_ponder_time_if_needed();
     [[nodiscard]] bool should_stop(bool force_time_check = false);
+    [[nodiscard]] bool search_aborted() const;
     [[nodiscard]] bool soft_time_expired() const;
     [[nodiscard]] int elapsed_ms() const;
 

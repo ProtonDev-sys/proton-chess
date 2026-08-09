@@ -40,6 +40,12 @@ HumanSettings resolved_human_settings(const EngineOptions& options) {
     };
 }
 
+int human_loss_allowance(const HumanSettings& human) {
+    const int skill_gap = 20 - human.skill;
+    return std::clamp(human.max_loss_cp + skill_gap * 8 +
+                      skill_gap * skill_gap * 2, 0, 700);
+}
+
 bool same_move(const Move& lhs, const Move& rhs) {
     return !lhs.is_null() && !rhs.is_null() && lhs == rhs;
 }
@@ -163,7 +169,7 @@ const Search::TTEntry* Search::probe(std::uint64_t key) const {
 
 void Search::store(std::uint64_t key, int depth, int score, int static_eval,
                    Bound bound, const Move& move, int ply) {
-    if (table_.empty() || stop_requested_.load(std::memory_order_relaxed)) return;
+    if (table_.empty() || search_aborted()) return;
 
     TTBucket& bucket = table_[static_cast<std::size_t>(key) & table_mask_];
     const std::uint32_t signature = tt_signature(key);
@@ -236,6 +242,7 @@ int Search::elapsed_ms() const {
 void Search::configure_time(const Position& position) {
     has_soft_deadline_ = false;
     has_hard_deadline_ = false;
+    has_main_deadline_ = false;
     soft_time_budget_ms_ = 0;
     hard_time_budget_ms_ = 0;
     ponder_time_activated_ = !limits_.ponder;
@@ -282,6 +289,14 @@ void Search::activate_time_budget(std::chrono::steady_clock::time_point now) {
     if (hard_time_budget_ms_ > 0) {
         hard_deadline_ = now + std::chrono::milliseconds(hard_time_budget_ms_);
         has_hard_deadline_ = true;
+        if (main_phase_) {
+            const int main_budget_ms = std::max(1, hard_time_budget_ms_ / 2);
+            main_deadline_ = now + std::chrono::milliseconds(main_budget_ms);
+            if (has_soft_deadline_ && soft_deadline_ < main_deadline_) {
+                main_deadline_ = soft_deadline_;
+            }
+            has_main_deadline_ = true;
+        }
     }
 }
 
@@ -296,15 +311,12 @@ void Search::activate_ponder_time_if_needed() {
 
 bool Search::should_stop(bool force_time_check) {
     activate_ponder_time_if_needed();
-    if (limits_.external_stop != nullptr &&
-        limits_.external_stop->load(std::memory_order_relaxed)) {
-        stop_requested_.store(true, std::memory_order_relaxed);
-        return true;
-    }
-    if (limits_.secondary_external_stop != nullptr &&
-        limits_.secondary_external_stop->load(std::memory_order_relaxed)) {
-        stop_requested_.store(true, std::memory_order_relaxed);
-        return true;
+    for (const std::atomic<bool>* external_stop : limits_.external_stops) {
+        if (external_stop != nullptr &&
+            external_stop->load(std::memory_order_relaxed)) {
+            stop_requested_.store(true, std::memory_order_relaxed);
+            return true;
+        }
     }
     if (limits_.external_deadline != nullptr &&
         std::chrono::steady_clock::now() >= *limits_.external_deadline) {
@@ -316,12 +328,25 @@ bool Search::should_stop(bool force_time_check) {
         stop_requested_.store(true, std::memory_order_relaxed);
         return true;
     }
+    if (main_phase_ && main_node_limit_ != 0 && nodes_ >= main_node_limit_) {
+        main_budget_exhausted_ = true;
+        return true;
+    }
     if (!force_time_check && (nodes_ & 1023ULL) != 0) return false;
     if (has_hard_deadline_ && std::chrono::steady_clock::now() >= hard_deadline_) {
         stop_requested_.store(true, std::memory_order_relaxed);
         return true;
     }
+    if (main_phase_ && has_main_deadline_ &&
+        std::chrono::steady_clock::now() >= main_deadline_) {
+        main_budget_exhausted_ = true;
+        return true;
+    }
     return false;
+}
+
+bool Search::search_aborted() const {
+    return stop_requested_.load(std::memory_order_relaxed) || main_budget_exhausted_;
 }
 
 bool Search::soft_time_expired() const {
@@ -1122,7 +1147,7 @@ int Search::search_root(Position& position, std::vector<RootMove>& root_moves,
         }
 
         position.unmake_move(root_move.move, undo);
-        if (stop_requested_.load(std::memory_order_relaxed)) break;
+        if (search_aborted()) break;
 
         root_move.score = score;
         root_move.exact = exact_score;
@@ -1267,8 +1292,12 @@ std::optional<SearchResult> Search::confirm_human_candidate(
     verifier_limits.depth = completed_depth;
     verifier_limits.search_moves_specified = true;
     verifier_limits.search_moves.push_back(candidate);
-    verifier_limits.external_stop = &stop_requested_;
-    verifier_limits.secondary_external_stop = limits_.external_stop;
+    verifier_limits.external_stops.reserve(limits_.external_stops.size() + 1);
+    verifier_limits.external_stops.push_back(&stop_requested_);
+    verifier_limits.external_stops.insert(
+        verifier_limits.external_stops.end(),
+        limits_.external_stops.begin(),
+        limits_.external_stops.end());
     std::optional<std::chrono::steady_clock::time_point> verifier_deadline;
     if (has_hard_deadline_) verifier_deadline = hard_deadline_;
     if (limits_.external_deadline != nullptr &&
@@ -1280,8 +1309,12 @@ std::optional<SearchResult> Search::confirm_human_candidate(
         verifier_limits.external_deadline = &*verifier_deadline;
     }
     if (limits_.node_limit != 0) {
-        if (nodes_ >= limits_.node_limit) return std::nullopt;
-        verifier_limits.node_limit = limits_.node_limit - nodes_;
+        const std::uint64_t remaining = limits_.node_limit -
+            std::min(nodes_, limits_.node_limit);
+        // A stopped child can report one node beyond its local UCI cap. Keep
+        // that historical convention inside the parent's absolute budget.
+        if (remaining <= 1) return std::nullopt;
+        verifier_limits.node_limit = remaining - 1;
     }
 
     SearchResult result = verifier.think(position, verifier_limits);
@@ -1309,11 +1342,15 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
         // distinguish equivalent mate lines here.
         return root_moves.front().move;
     }
+    if (limits_.ponder && !ponder_time_activated_) {
+        // A bounded ponder can finish before ponderhit. Without an activated
+        // clock, a nested confirmation would have no deadline to inherit.
+        return root_moves.front().move;
+    }
 
     const int skill = human.skill;
     const int skill_gap = 20 - skill;
-    const int allowance = std::clamp(human.max_loss_cp + skill_gap * 8 +
-                                     skill_gap * skill_gap * 2, 0, 700);
+    const int allowance = human_loss_allowance(human);
     const int best_score = root_moves.front().score;
     const int threshold = best_score - allowance;
     const double temperature = std::max(3.0, 4.0 + skill_gap * 3.5);
@@ -1326,33 +1363,41 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     // before it can be returned.
     std::vector<bool> eligible(candidate_limit, false);
     eligible.front() = true;
-    for (std::size_t index = 1; index < candidate_limit; ++index) {
-        RootMove& candidate = root_moves[index];
-        if (eligible[index] || candidate.score == NoScore ||
-            candidate.score < threshold) {
-            continue;
+    if (selection_budget_reserved_) {
+        // Root PVS scores are provisional here. Sample from plausible moves and
+        // spend the reserved budget on the one fresh search that can admit it.
+        for (std::size_t index = 1; index < candidate_limit; ++index) {
+            const RootMove& candidate = root_moves[index];
+            eligible[index] = candidate.score != NoScore && candidate.score >= threshold;
         }
-        if (should_stop(true)) break;
+    } else {
+        for (std::size_t index = 1; index < candidate_limit; ++index) {
+            RootMove& candidate = root_moves[index];
+            if (eligible[index] || candidate.score == NoScore ||
+                candidate.score < threshold) {
+                continue;
+            }
+            if (should_stop(true)) break;
 
-        Position copy = position;
-        UndoState undo;
-        if (!copy.make_move(candidate.move, undo)) {
-            candidate.score = NoScore;
-            continue;
-        }
-        move_stack_[0] = candidate.move;
-        moved_piece_stack_[0] = copy.piece_at(candidate.move.to);
-        const int prior_score = candidate.score;
-        verification_search_ = true;
-        const int verified = -alpha_beta(copy, completed_depth - 1,
-                                         -threshold, -threshold + 1, 1,
-                                         true, false, true, candidate.move);
-        verification_search_ = false;
-        if (stop_requested_.load(std::memory_order_relaxed)) break;
-        if (verified < threshold) {
-            candidate.score = verified;
-            continue;
-        } else {
+            Position copy = position;
+            UndoState undo;
+            if (!copy.make_move(candidate.move, undo)) {
+                candidate.score = NoScore;
+                continue;
+            }
+            move_stack_[0] = candidate.move;
+            moved_piece_stack_[0] = copy.piece_at(candidate.move.to);
+            const int prior_score = candidate.score;
+            verification_search_ = true;
+            const int verified = -alpha_beta(copy, completed_depth - 1,
+                                             -threshold, -threshold + 1, 1,
+                                             true, false, true, candidate.move);
+            verification_search_ = false;
+            if (search_aborted()) break;
+            if (verified < threshold) {
+                candidate.score = verified;
+                continue;
+            }
             candidate.score = std::max(prior_score, threshold);
             eligible[index] = true;
         }
@@ -1373,9 +1418,9 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     }
     if (candidates.size() <= 1) return root_moves.front().move;
 
-    constexpr int MaxConfirmations = 3;
+    const int max_confirmations = selection_budget_reserved_ ? 1 : 3;
     for (int attempt = 0;
-         attempt < MaxConfirmations && candidates.size() > 1;
+         attempt < max_confirmations && candidates.size() > 1;
          ++attempt) {
         std::discrete_distribution<std::size_t> distribution(
             weights.begin(), weights.end());
@@ -1409,6 +1454,14 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     stop_requested_.store(false, std::memory_order_relaxed);
     if (start_callback) start_callback();
     limits_ = limits;
+    main_node_limit_ = 0;
+    main_budget_exhausted_ = false;
+    selection_budget_reserved_ = false;
+    const HumanSettings active_human = resolved_human_settings(options_);
+    main_phase_ = active_human.enabled && human_loss_allowance(active_human) > 0;
+    if (main_phase_ && limits_.node_limit != 0) {
+        main_node_limit_ = std::max<std::uint64_t>(1, limits_.node_limit / 2);
+    }
     if (!limits_.ponder) {
         ponder_state_.store(PonderState::Inactive, std::memory_order_release);
     } else if (ponder_state_.load(std::memory_order_acquire) == PonderState::Inactive) {
@@ -1423,6 +1476,11 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     selective_depth_ = 0;
     start_time_ = std::chrono::steady_clock::now();
     configure_time(position);
+    selection_budget_reserved_ = main_phase_ &&
+        (main_node_limit_ != 0 || hard_time_budget_ms_ > 0);
+    main_phase_ = selection_budget_reserved_;
+    // configure_time() may have created this from the provisional main phase.
+    if (!selection_budget_reserved_) has_main_deadline_ = false;
     ++generation_;
     if (generation_ == 0) ++generation_;
 
@@ -1506,7 +1564,7 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
         while (!should_stop(true)) {
             pv_length_[0] = 0;
             score = search_root(position, root_moves, depth, alpha, beta);
-            if (stop_requested_.load(std::memory_order_relaxed)) break;
+            if (search_aborted()) break;
 
             if (score <= alpha) {
                 delta = std::min(4096, delta * 2);
@@ -1551,6 +1609,9 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
             if (now - start_time_ >= total * 3 / 4) break;
         }
     }
+
+    main_phase_ = false;
+    main_budget_exhausted_ = false;
 
     if (completed_depth == 0) {
         // A stop can arrive before depth one finishes. Root moves are already
