@@ -351,6 +351,14 @@ void UciLoop::handle_command(const std::string& line, bool& quit) {
     } else if (line == "eval") {
         stop_search();
         print_line("info string evaluation " + std::to_string(evaluator_.evaluate(position_)) + " cp");
+    } else if (line == "moves") {
+        stop_search();
+        std::vector<Move> legal_moves;
+        position_.generate_legal_moves(legal_moves);
+        std::sort(legal_moves.begin(), legal_moves.end(), [](const Move& lhs, const Move& rhs) {
+            return lhs.to_uci() < rhs.to_uci();
+        });
+        for (const Move& move : legal_moves) print_line(move.to_uci());
     } else if (line.rfind("perft ", 0) == 0) {
         stop_search();
         int depth = 0;
