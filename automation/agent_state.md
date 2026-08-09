@@ -2,13 +2,27 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T20:42:45+01:00`
+- Last run: `2026-08-09T21:44:51+01:00`
 - Status: `passed`
-- Change kept: pawn-safe knight and bishop mobility
-- Active branch: `agent/eval-safe-mobility-2`
-- Base: `origin/main` at `2bdf8fd`
+- Change kept: own rook behind an unobstructed passed pawn
+- Active branch: `agent/eval-rook-passer`
+- Base: `origin/main` at `bec7218`
 
 ## Latest evidence
+
+- An own rook with a clear same-file ray behind its passed pawn receives a deliberately small `+8` middlegame / `+18` endgame bonus. Rooks in front, beside the pawn, behind an enemy passer or separated by any blocker receive none.
+- Paired white/black evaluator fixtures isolate the 17 cp tapered increment in the test endgame and prove color and side-to-move symmetry. Front, blocked and enemy-rook negatives are covered.
+- Across all 200 pinned UHO positions at depth 10 and Hash 16, the candidate used 53,108,913 nodes versus 53,009,557 for merged main (`+0.187%`). Best moves matched on 174/200 positions, scores on 125/200 and PVs on 124/200, confirming that the term is active with little search cost.
+- A separate 20-game lifecycle smoke completed legally. The fixed 400-game, 200-pair A/B then scored 156 wins, 96 draws and 148 losses: `51.0%`, approximately `+6.95` Elo.
+- The exact paired result is inconclusive (`p_gain=0.3281`, `p_regression=0.7165`; score interval `[0.41397, 0.60603]`). It does not establish a strength gain or non-inferiority.
+- The final A/B had 304 checkmates, 76 threefold repetitions, 7 move-limit draws, 7 insufficient-material draws and 6 fifty-move draws. All 400 raw records, 200 color-swapped pairs, totals and binary hashes recomputed; there were no illegal moves, flags, timeouts or protocol failures.
+- Independent evaluator review found no color/rank, blocker, duplicate-bonus, occupancy, double-counting or performance defect. Whole-evaluation constants in some negative fixtures are acknowledged as a maintenance cost.
+- Two search experiments were rejected before this change: aspiration fail-high score carry increased nodes by `1.951%`; TT-refuted ProbCut saved only `0.0014%`. Neither remains in the tree.
+- Full validation passes: 7/7 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The Windows executable SHA-256 is `88d7bdfca50a50f6e21e0270165dd543bdd83f0f05ad8d6d97a272306dea27fb`; the certification manifest pins it.
+- This run keeps a human-style evaluation improvement. It does not claim statistically significant strength, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: pawn-safe minor mobility
 
 - Knight and bishop mobility now excludes destinations controlled by enemy pawns. Their complete pseudo-attack maps still feed king safety and other attack terms, and rook, queen and king mobility are unchanged.
 - Mirrored evaluator fixtures prove one unsafe knight destination costs exactly 4 cp, one unsafe bishop destination costs 5 cp after tapering, both terms are color symmetric, and a rook scope guard is unchanged.
@@ -208,7 +222,9 @@
 
 ## Next target
 
-- Gate pawn-safe knight and bishop mobility with mirrored regressions and paired before/after evidence.
+- Preserve checking captures that currently fail qsearch delta pruning before their checking status is known, then screen the tactical gain and runtime cost separately.
+- Add a reproducible paired fixed-depth search comparison tool instead of relying on inline benchmark harnesses.
+- Add an explicit seeded alternative-selection opportunity rate so the 1200/1800/2400 modes can tune human-like error frequency independently from confirmed error size.
 - Add singular extension only after explicitly tracking whether a TT move belongs to its stored value.
 - Calibrate advertised Elo modes only after full-strength search and evaluation changes settle.
 - Reserve the pinned `60+0.6`, 400-game Stockfish-3000 run for clean release candidates.

@@ -326,6 +326,23 @@ int CoreEvalNet::evaluate(const Position& position) const {
                 mg -= sign * 7;
                 eg -= sign * 12;
             }
+
+            // A rook directly behind its own passer supports every advance
+            // while staying active. The sliding ray also ensures that no
+            // intervening piece can earn the bonus.
+            Bitboard supporting_rooks =
+                attacks::rook(square, position.occupancy_all()) &
+                position.pieces(make_piece(color, Rook));
+            while (supporting_rooks != 0) {
+                const int rook_square =
+                    static_cast<int>(std::countr_zero(supporting_rooks));
+                supporting_rooks &= supporting_rooks - 1;
+                if (relative_rank(color, rook_square) <
+                    relative_rank(color, square)) {
+                    mg += sign * 8;
+                    eg += sign * 18;
+                }
+            }
         }
 
         for (PieceType type : {Knight, Bishop}) {

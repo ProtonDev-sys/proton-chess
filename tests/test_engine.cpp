@@ -321,6 +321,61 @@ void test_pawn_safe_minor_mobility() {
            "pawn-safe mobility remains limited to knights and bishops");
 }
 
+void test_rook_behind_passed_pawn() {
+    proton::EngineOptions options;
+    options.use_book = false;
+    proton::Evaluator evaluator;
+    evaluator.set_options(options);
+
+    const auto evaluate = [&](const std::string& fen, const std::string& label) {
+        proton::Position position;
+        expect(position.set_fen(fen), label + " FEN parses");
+        return evaluator.evaluate(position);
+    };
+
+    const int white_support = evaluate(
+        "7k/8/8/8/2p5/P1P5/8/R6K w - - 0 1", "white rook behind passer");
+    const int white_control = evaluate(
+        "7k/8/8/8/2p5/P1P5/8/2R4K w - - 0 1", "white rook control");
+    const int black_support = evaluate(
+        "k6r/8/5p1p/5P2/8/8/8/K7 b - - 0 1", "black rook behind passer");
+    const int black_control = evaluate(
+        "k4r2/8/5p1p/5P2/8/8/8/K7 b - - 0 1", "black rook control");
+    expect(white_support == 741 && white_control == 724 &&
+               white_support - white_control == 17,
+           "an unobstructed own rook behind a passer earns the tapered bonus");
+    expect(black_support == white_support && black_control == white_control,
+           "rook-behind-passer scoring is color and side-to-move symmetric");
+
+    const int white_front = evaluate(
+        "7k/8/8/8/R1p5/P1P5/8/7K w - - 0 1", "white rook in front of passer");
+    const int black_front = evaluate(
+        "k7/8/5p1p/5P1r/8/8/8/K7 b - - 0 1", "black rook in front of passer");
+    expect(white_front == 718 && black_front == white_front,
+           "a rook in front of its passer does not earn the support bonus");
+
+    const int white_blocked = evaluate(
+        "7k/8/8/8/2p5/P1P5/p7/R6K w - - 0 1", "blocked white supporting rook");
+    const int black_blocked = evaluate(
+        "k6r/7P/5p1p/5P2/8/8/8/K7 b - - 0 1", "blocked black supporting rook");
+    expect(white_blocked == 425 && black_blocked == white_blocked,
+           "an intervening piece prevents the rook support bonus");
+
+    const int white_enemy_support = evaluate(
+        "7k/8/8/8/2p5/P1PP4/7K/r7 w - - 0 1", "enemy rook behind white passer");
+    const int white_enemy_control = evaluate(
+        "7k/8/8/8/2p5/P1PP4/7K/3r4 w - - 0 1", "enemy rook control");
+    const int black_enemy_support = evaluate(
+        "7R/k7/4pp1p/5P2/8/8/8/K7 b - - 0 1", "enemy rook behind black passer");
+    const int black_enemy_control = evaluate(
+        "4R3/k7/4pp1p/5P2/8/8/8/K7 b - - 0 1", "mirrored enemy rook control");
+    expect(white_enemy_support == -326 &&
+               white_enemy_support == white_enemy_control &&
+               black_enemy_support == black_enemy_control &&
+               black_enemy_support == white_enemy_support,
+           "only an own rook behind the passer earns the support bonus");
+}
+
 proton::Bitboard slow_sliding_attacks(int square, proton::Bitboard occupied,
                                       const std::vector<int>& directions) {
     proton::Bitboard result = 0;
@@ -1085,6 +1140,7 @@ int main() {
     test_repetition_and_null_move();
     test_draw_material();
     test_pawn_safe_minor_mobility();
+    test_rook_behind_passed_pawn();
     test_attack_tables();
     test_static_exchange();
     test_search_tactics();
