@@ -2,13 +2,26 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T19:44:03+01:00`
+- Last run: `2026-08-09T20:42:45+01:00`
 - Status: `passed`
-- Change kept: exact node caps and stop-aware re-search propagation
-- Active branch: `agent/verifier-node-cap-2`
-- Base: `origin/main` at `54168b0`
+- Change kept: pawn-safe knight and bishop mobility
+- Active branch: `agent/eval-safe-mobility-2`
+- Base: `origin/main` at `2bdf8fd`
 
 ## Latest evidence
+
+- Knight and bishop mobility now excludes destinations controlled by enemy pawns. Their complete pseudo-attack maps still feed king safety and other attack terms, and rook, queen and king mobility are unchanged.
+- Mirrored evaluator fixtures prove one unsafe knight destination costs exactly 4 cp, one unsafe bishop destination costs 5 cp after tapering, both terms are color symmetric, and a rook scope guard is unchanged.
+- Evaluation-sensitive limiter fixtures were retuned without weakening their invariants. A purpose-built two-move regression independently scores `Qb6` at `+46` and `b6` at `+10`, then proves the 36 cp-loss move is sampled and rejected against a 22 cp allowance by checking the following seeded RNG draw.
+- The completed 400-game, 200-pair A/B against merged main scored 151 wins, 107 draws and 142 losses: `51.125%`, approximately `+7.82` Elo. The exact paired result is inconclusive (`p_gain=0.3232`, `p_regression=0.7168`); the screen detected neither a significant gain nor a significant regression and does not establish non-inferiority.
+- The final A/B had 293 checkmates, 69 threefold draws, 16 insufficient-material draws, 14 move-limit draws and 8 fifty-move draws. It completed with no illegal moves, flags or timeouts.
+- Two earlier attempts were excluded after a child process exited with code 1. The captured final position survived 100 fresh searches, five full 107-search state replays and five Linux ASan/UBSan replays; the traceback-enabled fixed sample then completed all 400 games. No engine defect was reproduced, so the interruptions are recorded rather than silently omitted.
+- Independent audit found no color, sign, move-generation, attack-map or outpost double-counting defect. Pinned pawns intentionally remain part of the pawn-safe pseudo-mobility approximation.
+- Full validation passes: 7/7 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The Windows executable SHA-256 is `ada74c93ae05d7b39daf77954f4c2367a493c3c57427ba9aa39be762cc5f8bc5`; the certification manifest pins it.
+- This run keeps a human-style evaluation improvement. It does not claim non-inferiority, increased strength, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: exact node caps and stop-aware re-search
 
 - A sticky node/main-budget stop is now checked before every possible follow-up search: razoring continuation, deep null verification, ProbCut confirmation, LMR/PVS re-search and root PVS re-search.
 - The child verifier receives the parent's exact remaining node budget. Any unexpected child overrun is rejected and the public parent count saturates at its cap rather than admitting a candidate or reporting an overrun.
