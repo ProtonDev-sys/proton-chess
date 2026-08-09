@@ -189,6 +189,7 @@ private:
                    bool pv_node, bool cut_node, bool allow_null,
                    const Move& previous_move);
     int quiescence(Position& position, int alpha, int beta, int ply);
+    [[nodiscard]] Move find_quiet_mate(Position& position, int ply);
     int search_root(Position& position, std::vector<RootMove>& root_moves,
                     int depth, int alpha, int beta);
 

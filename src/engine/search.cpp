@@ -16,6 +16,7 @@ namespace proton {
 namespace {
 
 constexpr int RootPolicyScale = 24;
+constexpr int QuietMateScanMaxPly = 3;
 
 bool same_move(const Move& lhs, const Move& rhs) {
     return !lhs.is_null() && !rhs.is_null() && lhs == rhs;
@@ -549,6 +550,37 @@ int Search::lmr_reduction(int depth, int move_number, bool pv_node, bool improvi
     return std::clamp(reduction, 0, std::max(0, depth - 2));
 }
 
+Move Search::find_quiet_mate(Position& position, int ply) {
+    std::vector<Move>& candidates = generated_moves_[ply];
+    position.generate_pseudo_moves(candidates);
+    std::vector<Move>& replies = generated_moves_[ply + 1];
+
+    for (const Move& move : candidates) {
+        if (should_stop()) return Move::null();
+        if (!is_quiet(move)) continue;
+
+        UndoState undo;
+        if (!position.make_move(move, undo)) continue;
+
+        bool has_legal_reply = true;
+        if (position.in_check(position.side_to_move())) {
+            has_legal_reply = false;
+            position.generate_pseudo_moves(replies);
+            for (const Move& reply : replies) {
+                UndoState reply_undo;
+                if (!position.make_move(reply, reply_undo)) continue;
+                position.unmake_move(reply, reply_undo);
+                has_legal_reply = true;
+                break;
+            }
+        }
+
+        position.unmake_move(move, undo);
+        if (!has_legal_reply) return move;
+    }
+    return Move::null();
+}
+
 int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     if (ply >= MaxPly - 1) return evaluator_.evaluate(position);
     ++nodes_;
@@ -566,6 +598,24 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     const int original_alpha = alpha;
     const std::uint64_t key = position.key();
     const bool rule50_sensitive = position.halfmove_clock() + 8 >= 100;
+
+    // At shallow frontiers, a captures-only qsearch can value a move as winning
+    // while overlooking an immediate quiet mate. Detect only mate-in-one here;
+    // adding general quiet checks would expand quiescence without a firm bound.
+    if (!in_check && ply <= QuietMateScanMaxPly) {
+        const Move quiet_mate = find_quiet_mate(position, ply);
+        if (!quiet_mate.is_null()) {
+            const int mate = MateScore - ply - 1;
+            pv_table_[ply][ply] = quiet_mate;
+            pv_length_[ply] = ply + 1;
+            selective_depth_ = std::max(selective_depth_, ply + 1);
+            if (!rule50_sensitive) {
+                store(key, 0, mate, NoScore, Bound::Exact, quiet_mate, ply);
+            }
+            return mate;
+        }
+    }
+
     Move tt_move = Move::null();
     int tt_static_eval = NoScore;
     int tt_score = NoScore;

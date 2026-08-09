@@ -355,6 +355,24 @@ void test_search_tactics() {
            "restricted stalemating move is searched");
     expect(stalemate_result.score_cp == 0,
            "quiescence scores stalemate as a draw, not static material");
+
+    search.new_game();
+    proton::Position quiet_mate_horizon;
+    expect(quiet_mate_horizon.set_fen(
+               "3r2k1/ppB2pp1/6b1/7p/1n1Pq3/2Q3P1/PP3P1P/2KR3R w - - 1 22"),
+           "quiet-mate horizon FEN");
+    proton::SearchLimits quiet_mate_limits;
+    quiet_mate_limits.depth = 1;
+    quiet_mate_limits.search_moves_specified = true;
+    quiet_mate_limits.search_moves.push_back(quiet_mate_horizon.parse_uci_move("c3b4"));
+    const proton::SearchResult quiet_mate_result =
+        search.think(quiet_mate_horizon, quiet_mate_limits);
+    expect(quiet_mate_result.best.to_uci() == "c3b4",
+           "restricted poisoned queen move is searched");
+    expect(quiet_mate_result.score_cp <= -proton::Search::mate_threshold(),
+           "quiescence sees the opponent's immediate quiet mate");
+    expect(quiet_mate_result.pv.size() >= 2 && quiet_mate_result.pv[1].to_uci() == "e4c2",
+           "quiet mate is preserved in the principal variation");
 }
 
 }  // namespace
