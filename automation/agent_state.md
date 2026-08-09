@@ -2,13 +2,28 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T06:15:02+01:00`
+- Last run: `2026-08-09T07:18:42+01:00`
 - Status: `passed`
-- Change kept: pair-aware inference, pentanomial summaries, and atomic match checkpoints
-- Active branch: `agent/pair-aware-match-stats`
-- Base: `origin/main` at `b79a5f57`
+- Change kept: pinned Stockfish-3000 certification inputs, FEN starts, and raw-record result verification
+- Active branch: `agent/pinned-stockfish3000-protocol`
+- Base: `origin/main` at `2294ac8`
 
 ## Latest evidence
+
+- The certification source is official-stockfish/books commit `65815cc`. The CC0 `UHO_Lichess_4852_v1.epd` archive, extracted EPD, SRI and position count were verified before derivation.
+- The source contains 2,632,036 legal non-terminal positions. A fixed content-hash ranking selects 200 positions; a full 8m36 legality scan and the optimized 2.9-second candidate-first generator selected identical FENs.
+- The checked-in suite SHA-256 is `4d94a44a0a3c8d687b145a4efd594acaa0ab8c904873784c662beafb50055b6d`. It has 200 unique legal positions: 110 white to move, 90 black to move, starting plies 5 through 16.
+- The match runner accepts six-field FEN starts while retaining legacy UCI move-line openings. Pair identity includes the opening index, FEN and moves.
+- The Windows AMD64 manifest fixes 400 games, 200 color-swapped pairs, Stockfish 18 at `UCI_Elo=3000`, `60+0.6`, one thread, 64 MB hash, seed `20260809`, a 600-ply cap, exact engine options and a strict pair-score lower-bound gate.
+- Stockfish's official `stockfish-windows-x86-64.zip` SHA-256 is `40cc9758...81a139`; its executable and the locally used executable both hash to `9bde4202...6e8d6`.
+- The launcher validates the full protocol shape, verifies platform, clean Git state, runner hash, exact `chess==1.11.2`, both engine hashes, suite hash and legal/unique position count, then launches private staged copies of every verified input.
+- The checker replays exactly 400 raw game records, enforces the deterministic opening schedule and color swap, verifies clocks/terminations, and recomputes W/D/L, score, pair scores, pentanomial counts, Hoeffding bounds and the pass gate. Fabricated summaries, NaN values, wrong openings, incomplete pairs and dependency drift have focused regressions.
+- A real FEN smoke exercised a black-to-move UHO position through both colors.
+- A pre-final-manifest full-clock pair at `60+0.6` took 285.8 seconds and scored `0.5/2` for Proton: one checkmate loss and one threefold draw. Its one-pair interval is `[0, 1]`; it is not an Elo claim. The strict checker rejects it as 2/400, dirty-tree evidence and a pre-final suite-file hash.
+- The focused tooling suites pass 48/48. Full canonical validation, 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions pass.
+- No engine-strength claim is made from this protocol run.
+
+## Previous run: pair-aware inference
 
 - Each color-swapped opening pair is one statistical sample. The two games within a pair are not treated as independent.
 - Schema version 2 reports normalized pair scores, raw-score pentanomial counts, and a two-sided 95% Hoeffding interval over complete pairs.
@@ -92,6 +107,6 @@
 
 ## Next target
 
-- Pin a neutral opening suite and the exact Stockfish-3000 `60+0.6` protocol, then run the first trustworthy baseline.
 - Repair the current human move selector and UCI Elo mapping before extending the advertised 2800 ceiling.
+- Add a shorter pinned paired protocol for iteration while reserving the `60+0.6`, 400-game run for clean release candidates.
 - Keep future engine changes only with focused regressions, canonical validation, and paired before/after strength evidence.

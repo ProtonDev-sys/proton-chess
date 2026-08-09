@@ -88,10 +88,17 @@ class GameOutcome:
 
 
 @dataclass
+class OpeningPosition:
+    fen: str
+    moves: list[str]
+
+
+@dataclass
 class GameRecord:
     pair: int
     proton_color: str
     opening_index: int
+    opening_fen: str
     opening_moves: list[str]
     point: float
     termination: str
@@ -188,12 +195,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_openings(path: Path) -> list[list[str]]:
-    openings: list[list[str]] = []
+def load_openings(path: Path) -> list[OpeningPosition]:
+    openings: list[OpeningPosition] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+
+        first_field = line.split(maxsplit=1)[0]
+        if "/" in first_field:
+            try:
+                board = chess.Board(line)
+            except ValueError:
+                continue
+            if board.is_valid() and not board.is_game_over(claim_draw=True):
+                openings.append(OpeningPosition(
+                    fen=board.fen(en_passant="fen"),
+                    moves=[],
+                ))
+            continue
+
         moves = line.split("|", 1)[-1].split()
         board = chess.Board()
         try:
@@ -202,21 +223,24 @@ def load_openings(path: Path) -> list[list[str]]:
         except ValueError:
             continue
         if not board.is_game_over(claim_draw=True):
-            openings.append(moves)
+            openings.append(OpeningPosition(fen=chess.STARTING_FEN, moves=moves))
     if not openings:
         raise ValueError(f"no valid openings found in {path}")
     return openings
 
 
 def select_openings(
-    openings: list[list[str]], pair_count: int, seed: int
-) -> list[tuple[int, list[str]]]:
+    openings: list[OpeningPosition], pair_count: int, seed: int
+) -> list[tuple[int, OpeningPosition]]:
     rng = random.Random(seed)
     indexed = list(enumerate(openings))
     selected = rng.sample(indexed, k=min(pair_count, len(indexed)))
     while len(selected) < pair_count:
         selected.append(rng.choice(indexed))
-    return [(index, list(moves)) for index, moves in selected]
+    return [
+        (index, OpeningPosition(opening.fen, list(opening.moves)))
+        for index, opening in selected
+    ]
 
 
 def logistic_elo(opponent_elo: int, score: float) -> float:
@@ -238,7 +262,11 @@ def complete_pair_scores(records: list[GameRecord]) -> list[float]:
             raise ValueError(f"pair {pair} has {len(pair_records)} games")
         if {record.proton_color for record in pair_records} != {"white", "black"}:
             raise ValueError(f"pair {pair} does not contain both Proton colors")
-        if len({record.opening_index for record in pair_records}) != 1:
+        opening_keys = {
+            (record.opening_index, record.opening_fen, tuple(record.opening_moves))
+            for record in pair_records
+        }
+        if len(opening_keys) != 1:
             raise ValueError(f"pair {pair} uses different openings")
         scores.append(sum(record.point for record in pair_records) / 2.0)
     return scores
@@ -437,7 +465,7 @@ def prepare_engine_for_game(
 def play_game(
     proton: Any,
     stockfish: Any,
-    opening: list[str],
+    opening: OpeningPosition,
     proton_is_white: bool,
     time_control: TimeControl,
     max_plies: int,
@@ -446,8 +474,8 @@ def play_game(
     player: PlayFunction = play_with_watchdog,
     clock: Callable[[], float] = time.monotonic,
 ) -> GameOutcome:
-    board = chess.Board()
-    for text in opening:
+    board = chess.Board(opening.fen)
+    for text in opening.moves:
         board.push_uci(text)
 
     clocks = None if time_control.base_seconds is None else {
@@ -514,7 +542,7 @@ def run_level(
     proton_path: Path,
     stockfish_path: Path,
     opponent_elo: int,
-    openings: list[list[str]],
+    openings: list[OpeningPosition],
     args: argparse.Namespace,
     time_control: TimeControl,
     checkpoint: Callable[[MatchResult], None] | None = None,
@@ -552,7 +580,8 @@ def run_level(
                 pair=pair_index,
                 proton_color="white" if proton_is_white else "black",
                 opening_index=opening_index,
-                opening_moves=list(opening),
+                opening_fen=opening.fen,
+                opening_moves=list(opening.moves),
                 point=outcome.point,
                 termination=outcome.termination,
                 plies=outcome.plies,
