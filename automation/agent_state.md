@@ -2,13 +2,27 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T17:45:24+01:00`
+- Last run: `2026-08-09T18:48:17+01:00`
 - Status: `passed`
-- Change kept: reserved confirmation budget for bounded limited play
-- Active branch: `agent/limiter-budget-reservation`
-- Base: `origin/main` at `1a39eb2`
+- Change kept: protect deep same-key transposition-table results from shallow writes
+- Active branch: `agent/search-strength-1`
+- Base: `origin/main` at `6d25433`
 
 ## Latest evidence
+
+- Same-key TT writes now update move ordering independently from value replacement. A shallow non-exact result cannot discard a result more than two plies deeper; exact and near-depth results retain the previous behavior.
+- Retained entries keep their score, static evaluation, depth and bound while refreshing their generation. A null move from a different-key bucket replacement now clears the evicted entry's unrelated move.
+- Direct regressions cover deep-value preservation with both present and null incoming moves, independent move refresh, the two-ply boundary, shallow exact replacement, null-move preservation, generation refresh and different-key move clearing.
+- Across all 200 pinned UHO positions at depth 9, candidate nodes fell by 0.21% at Hash 1 and 0.49% at Hash 64. Best moves matched the baseline on 193/200 and 194/200 positions respectively; the change is intentionally not described as behavior-preserving.
+- A 20-game paired smoke completed legally at 50 ms/move with no engine errors. The candidate scored 7 wins, 4 draws and 9 losses.
+- The 200-game screen scored 70 wins, 69 draws and 61 losses: 52.25%, approximately +15.65 Elo. The exact pair randomization result was inconclusive (`p_gain=0.1938`) at the strict `0.005` early-look threshold.
+- The final 400-game, 200-pair run scored 145 wins, 111 draws and 144 losses: 50.125%, approximately +0.87 Elo. The exact test was inconclusive (`p_gain=0.5`, `p_regression=0.5511`) at the final `0.045` threshold. This is evidence of no detected regression, not evidence of an Elo gain.
+- Full validation passes: 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions.
+- The Windows executable SHA-256 is `1123e22a742f70e18ba04012293f313ad17e62f70a4830ec91bd6b8e67c791e7`; the certification manifest pins it.
+- The match runner's second-engine path did not set a deterministic `HumanSeed` on the baseline Proton binary. The paired matches are therefore only a gross regression screen, not strictly reproducible patch-isolation evidence.
+- This run repairs TT replacement semantics and slightly reduces fixed-depth nodes. It does not claim increased strength, calibrated Elo or a Stockfish-3000 win.
+
+## Previous run: reserved budget for bounded human play
 
 - Positive-loss limiter modes now separate main-search budget exhaustion from real stop/cancel state. The main phase reserves half the node cap or bounded hard time for one fresh same-depth candidate confirmation.
 - Bounded selection samples once from PVS-plausible moves. No alternative is returned unless the isolated verifier completes at the same depth and scores inside the configured loss allowance; every interruption falls back to the completed root best.
@@ -151,6 +165,7 @@
 
 ## Next target
 
-- Repair the current human move selector and UCI Elo mapping before extending the advertised 2800 ceiling.
-- Add a shorter pinned paired protocol for iteration while reserving the `60+0.6`, 400-game run for clean release candidates.
-- Keep future engine changes only with focused regressions, canonical validation, and paired before/after strength evidence.
+- Gate pawn-safe knight and bishop mobility with mirrored regressions and paired before/after evidence.
+- Add singular extension only after explicitly tracking whether a TT move belongs to its stored value.
+- Calibrate advertised Elo modes only after full-strength search and evaluation changes settle.
+- Reserve the pinned `60+0.6`, 400-game Stockfish-3000 run for clean release candidates.

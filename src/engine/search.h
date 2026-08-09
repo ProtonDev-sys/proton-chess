@@ -14,6 +14,8 @@
 
 namespace proton {
 
+struct SearchTestAccess;
+
 struct SearchLimits {
     int depth = 0;
     int movetime_ms = 0;
@@ -76,6 +78,8 @@ public:
     [[nodiscard]] static constexpr int mate_threshold() { return 31800; }
 
 private:
+    friend struct SearchTestAccess;
+
     static constexpr int MaxPly = 128;
     static constexpr int Infinity = 32767;
     static constexpr int MateScore = 32000;

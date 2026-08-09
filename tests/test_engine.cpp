@@ -13,6 +13,54 @@
 #include "engine/search.h"
 #include "engine/see.h"
 
+namespace proton {
+
+struct SearchTestAccess {
+    enum class TestBound { Upper, Lower, Exact };
+
+    struct EntrySnapshot {
+        bool found = false;
+        int score = 0;
+        int static_eval = 0;
+        int depth = 0;
+        TestBound bound = TestBound::Upper;
+        std::uint8_t generation = 0;
+        Move move = Move::null();
+    };
+
+    static void set_generation(Search& search, std::uint8_t generation) {
+        search.generation_ = generation;
+    }
+
+    static void store(Search& search, std::uint64_t key, int depth, int score,
+                      int static_eval, TestBound bound, const Move& move) {
+        Search::Bound internal_bound = Search::Bound::Upper;
+        if (bound == TestBound::Lower) internal_bound = Search::Bound::Lower;
+        if (bound == TestBound::Exact) internal_bound = Search::Bound::Exact;
+        search.store(key, depth, score, static_eval, internal_bound, move, 0);
+    }
+
+    static EntrySnapshot probe(const Search& search, std::uint64_t key) {
+        const Search::TTEntry* entry = search.probe(key);
+        if (entry == nullptr) return {};
+
+        TestBound bound = TestBound::Upper;
+        if (entry->bound == Search::Bound::Lower) bound = TestBound::Lower;
+        if (entry->bound == Search::Bound::Exact) bound = TestBound::Exact;
+        return EntrySnapshot{
+            true,
+            Search::score_from_tt(entry->score, 0),
+            entry->static_eval,
+            entry->depth,
+            bound,
+            entry->generation,
+            entry->move,
+        };
+    }
+};
+
+}  // namespace proton
+
 namespace {
 
 int failures = 0;
@@ -785,6 +833,79 @@ void test_search_tactics() {
            "quiet mate is preserved in the principal variation");
 }
 
+void test_tt_same_key_replacement() {
+    proton::EngineOptions options;
+    options.hash_mb = 1;
+    proton::Evaluator evaluator;
+    evaluator.set_options(options);
+    proton::Search search(evaluator, options);
+
+    using Access = proton::SearchTestAccess;
+    using Bound = Access::TestBound;
+    constexpr std::uint64_t key = 0x0123456789abcdefULL;
+    const proton::Move move_a{12, 28, proton::NoPieceType, proton::MoveQuiet};
+    const proton::Move move_b{11, 27, proton::NoPieceType, proton::MoveQuiet};
+
+    Access::set_generation(search, 7);
+    Access::store(search, key, 10, 123, 45, Bound::Lower, move_a);
+    Access::store(search, key, 2, -70, -25, Bound::Upper, move_b);
+    Access::EntrySnapshot entry = Access::probe(search, key);
+    expect(entry.found && entry.depth == 10 && entry.score == 123 &&
+               entry.static_eval == 45 && entry.bound == Bound::Lower,
+           "shallow same-key bound preserves deeper TT value data");
+    expect(entry.move == move_b,
+           "shallow same-key write can refresh the TT move independently");
+
+    Access::store(search, key, 7, -40, -15, Bound::Upper, proton::Move::null());
+    entry = Access::probe(search, key);
+    expect(entry.depth == 10 && entry.score == 123 && entry.static_eval == 45 &&
+               entry.bound == Bound::Lower,
+           "shallow null same-key bound also preserves deeper TT value data");
+    expect(entry.move == move_b,
+           "rejected shallow null write preserves the existing TT move");
+
+    Access::store(search, key, 8, 81, 19, Bound::Upper, proton::Move::null());
+    entry = Access::probe(search, key);
+    expect(entry.depth == 8 && entry.score == 81 && entry.static_eval == 19 &&
+               entry.bound == Bound::Upper,
+           "near-depth same-key bound replaces older TT value data");
+    expect(entry.move == move_b, "null same-key write preserves the existing TT move");
+
+    Access::store(search, key, 1, 7, 3, Bound::Exact, proton::Move::null());
+    entry = Access::probe(search, key);
+    expect(entry.depth == 1 && entry.score == 7 && entry.static_eval == 3 &&
+               entry.bound == Bound::Exact,
+           "shallow exact same-key result replaces deeper bound data");
+    expect(entry.move == move_b, "exact null write does not erase the TT move");
+
+    constexpr std::uint64_t aged_key = 0xfedcba9876543210ULL;
+    Access::set_generation(search, 11);
+    Access::store(search, aged_key, 12, 210, 80, Bound::Lower, move_a);
+    Access::set_generation(search, 12);
+    Access::store(search, aged_key, 2, -12, -6, Bound::Upper, move_b);
+    entry = Access::probe(search, aged_key);
+    expect(entry.depth == 12 && entry.score == 210 && entry.static_eval == 80 &&
+               entry.bound == Bound::Lower && entry.generation == 12,
+           "retained same-key result is refreshed into the current generation");
+    expect(entry.move == move_b, "aged same-key write still refreshes its move");
+
+    // All keys share the same low bits and therefore the same one-megabyte
+    // table bucket. The fifth write evicts the shallowest entry.
+    constexpr std::uint64_t bucket_index = 0x1234ULL;
+    for (int slot = 0; slot < 4; ++slot) {
+        const std::uint64_t collision = bucket_index |
+            (static_cast<std::uint64_t>(slot + 1) << 32U);
+        Access::store(search, collision, slot + 1, 20 + slot, 10 + slot,
+                      Bound::Lower, move_a);
+    }
+    constexpr std::uint64_t replacement_key = bucket_index | (9ULL << 32U);
+    Access::store(search, replacement_key, 6, 90, 30, Bound::Lower,
+                  proton::Move::null());
+    entry = Access::probe(search, replacement_key);
+    expect(entry.found && entry.move.is_null(),
+           "different-key replacement clears an unrelated TT move");
+}
+
 }  // namespace
 
 int main() {
@@ -809,6 +930,7 @@ int main() {
     test_attack_tables();
     test_static_exchange();
     test_search_tactics();
+    test_tt_same_key_replacement();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
