@@ -1224,7 +1224,8 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
 }
 
 SearchResult Search::think(Position position, const SearchLimits& limits,
-                           const InfoCallback& callback) {
+                           const InfoCallback& callback,
+                           const StartCallback& start_callback) {
     searching_.store(true, std::memory_order_relaxed);
     struct SearchingGuard {
         std::atomic<bool>& flag;
@@ -1232,6 +1233,7 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     } guard{searching_};
 
     stop_requested_.store(false, std::memory_order_relaxed);
+    if (start_callback) start_callback();
     limits_ = limits;
     if (!limits_.ponder) {
         ponder_state_.store(PonderState::Inactive, std::memory_order_release);

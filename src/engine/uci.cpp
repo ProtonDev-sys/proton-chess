@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <string_view>
@@ -110,9 +111,13 @@ void UciLoop::start_search(const SearchLimits& limits) {
     if (limits.ponder) search_.begin_ponder();
 
     Position root = position_;
-    worker_ = std::thread([this, root = std::move(root), limits]() mutable {
+    std::promise<void> search_started;
+    std::future<void> search_started_future = search_started.get_future();
+    worker_ = std::thread([this, root = std::move(root), limits,
+                           search_started = std::move(search_started)]() mutable {
         const SearchResult result = search_.think(std::move(root), limits,
-            [this](const SearchInfo& info) { print_info(info); });
+            [this](const SearchInfo& info) { print_info(info); },
+            [&search_started] { search_started.set_value(); });
 
         if (limits.ponder) {
             std::unique_lock lock(ponder_mutex_);
@@ -124,6 +129,7 @@ void UciLoop::start_search(const SearchLimits& limits) {
         if (!result.ponder.is_null()) output << " ponder " << result.ponder.to_uci();
         print_line(output.str());
     });
+    search_started_future.wait();
 }
 
 void UciLoop::handle_position(const std::string& line) {

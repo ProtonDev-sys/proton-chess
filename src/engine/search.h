@@ -53,6 +53,7 @@ struct SearchResult {
 class Search {
 public:
     using InfoCallback = std::function<void(const SearchInfo&)>;
+    using StartCallback = std::function<void()>;
 
     explicit Search(Evaluator& evaluator);
 
@@ -64,7 +65,8 @@ public:
     [[nodiscard]] bool is_searching() const { return searching_.load(std::memory_order_relaxed); }
 
     SearchResult think(Position position, const SearchLimits& limits,
-                       const InfoCallback& callback = {});
+                       const InfoCallback& callback = {},
+                       const StartCallback& start_callback = {});
 
     [[nodiscard]] static constexpr int mate_score() { return 32000; }
     [[nodiscard]] static constexpr int mate_threshold() { return 31800; }
