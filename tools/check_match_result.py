@@ -28,6 +28,10 @@ def same_number(actual: Any, expected: float) -> bool:
     )
 
 
+def same_hash(actual: Any, expected: str) -> bool:
+    return isinstance(actual, str) and actual.lower() == expected.lower()
+
+
 def expected_point(record: estimate_elo.GameRecord, winner: chess.Color | None) -> float:
     if winner is None:
         return 0.5
@@ -161,7 +165,7 @@ def parse_records(
         if record.proton_color not in {"white", "black"}:
             errors.append(f"Stockfish Elo {rating} record {index} has invalid Proton color")
             continue
-        if record.point not in {0.0, 0.5, 1.0}:
+        if isinstance(record.point, bool) or record.point not in {0.0, 0.5, 1.0}:
             errors.append(f"Stockfish Elo {rating} record {index} has invalid point")
             continue
         if not isinstance(record.opening_moves, list) or not isinstance(record.moves, list):
@@ -263,9 +267,9 @@ def load_verified_openings(
 ) -> list[estimate_elo.OpeningPosition]:
     runner = (repository_root / protocol["runner"]["path"]).resolve()
     openings_path = (repository_root / protocol["openings"]["path"]).resolve()
-    if sha256_file(runner) != protocol["runner"]["sha256"]:
+    if sha256_file(runner) != protocol["runner"]["sha256"].lower():
         raise ValueError("local runner hash does not match the protocol")
-    if sha256_file(openings_path) != protocol["openings"]["sha256"]:
+    if sha256_file(openings_path) != protocol["openings"]["sha256"].lower():
         raise ValueError("local opening suite hash does not match the protocol")
     if getattr(chess, "__version__", "unknown") != protocol["python_chess_version"]:
         raise ValueError("local python-chess version does not match the protocol")
@@ -299,7 +303,7 @@ def validate_result(
     require(report.get("hash_mb") == protocol["hash_mb"], "hash size mismatch")
     require(report.get("seed") == protocol["seed"], "seed mismatch")
     require(
-        report.get("tool", {}).get("sha256") == protocol["runner"]["sha256"],
+        same_hash(report.get("tool", {}).get("sha256"), protocol["runner"]["sha256"]),
         "runner hash mismatch",
     )
     require(
@@ -335,13 +339,25 @@ def validate_result(
         "watchdog grace mismatch",
     )
     require(
-        report.get("openings", {}).get("sha256") == protocol["openings"]["sha256"],
+        same_hash(
+            report.get("openings", {}).get("sha256"),
+            protocol["openings"]["sha256"],
+        ),
         "opening suite hash mismatch",
     )
     require(
-        report.get("stockfish", {}).get("sha256")
-        == protocol["stockfish"]["binary_sha256"],
+        same_hash(
+            report.get("stockfish", {}).get("sha256"),
+            protocol["stockfish"]["binary_sha256"],
+        ),
         "Stockfish binary hash mismatch",
+    )
+    require(
+        same_hash(
+            report.get("proton", {}).get("sha256"),
+            protocol["proton"]["binary_sha256"],
+        ),
+        "Proton binary hash mismatch",
     )
     require(
         report.get("proton_options") == protocol["proton_options"],
@@ -419,8 +435,7 @@ def main() -> int:
     try:
         protocol_path = args.protocol.resolve()
         protocol = load_protocol(protocol_path)
-        repository_root = protocol_path.parents[1]
-        openings = load_verified_openings(protocol, repository_root)
+        openings = load_verified_openings(protocol, ROOT)
         report = json.loads(args.report.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError) as error:
         print(f"FAIL: {error}", file=sys.stderr)

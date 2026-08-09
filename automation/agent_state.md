@@ -16,11 +16,11 @@
 - The match runner accepts six-field FEN starts while retaining legacy UCI move-line openings. Pair identity includes the opening index, FEN and moves.
 - The Windows AMD64 manifest fixes 400 games, 200 color-swapped pairs, Stockfish 18 at `UCI_Elo=3000`, `60+0.6`, one thread, 64 MB hash, seed `20260809`, a 600-ply cap, exact engine options and a strict pair-score lower-bound gate.
 - Stockfish's official `stockfish-windows-x86-64.zip` SHA-256 is `40cc9758...81a139`; its executable and the locally used executable both hash to `9bde4202...6e8d6`.
-- The launcher verifies platform, clean Git state, runner hash, exact `chess==1.11.2`, Stockfish hash, suite hash, legal/unique position count and duplicated protocol fields before starting.
+- The launcher verifies platform, clean Git state, runner hash, exact `chess==1.11.2`, both engine hashes, suite hash, legal/unique position count and duplicated protocol fields before starting.
 - The checker replays exactly 400 raw game records, enforces the deterministic opening schedule and color swap, verifies clocks/terminations, and recomputes W/D/L, score, pair scores, pentanomial counts, Hoeffding bounds and the pass gate. Fabricated summaries, NaN values, wrong openings, incomplete pairs and dependency drift have focused regressions.
 - A real FEN smoke exercised a black-to-move UHO position through both colors.
 - A pre-final-manifest full-clock pair at `60+0.6` took 285.8 seconds and scored `0.5/2` for Proton: one checkmate loss and one threefold draw. Its one-pair interval is `[0, 1]`; it is not an Elo claim. The strict checker rejects it as 2/400, dirty-tree evidence and a pre-final suite-file hash.
-- The focused tooling suites pass 43/43. Full canonical validation, 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions pass.
+- The focused tooling suites pass 48/48. Full canonical validation, 6/6 CTest targets, 5/5 perft cases and 49/49 move-generation positions pass.
 - No engine-strength claim is made from this protocol run.
 
 ## Previous run: pair-aware inference

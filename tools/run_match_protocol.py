@@ -29,6 +29,14 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
 def load_protocol(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1:
@@ -53,6 +61,8 @@ def load_protocol(path: Path) -> dict[str, Any]:
         raise ValueError("Stockfish Threads must be one")
     if stockfish_options.get("UCI_LimitStrength") is not True:
         raise ValueError("Stockfish UCI_LimitStrength must be true")
+    if not is_sha256(payload.get("proton", {}).get("binary_sha256")):
+        raise ValueError("protocol Proton binary_sha256 must be a SHA-256 digest")
     proton_options = payload.get("proton_options", {})
     if proton_options != {
         "Hash": payload.get("hash_mb"),
@@ -106,6 +116,12 @@ def verified_inputs(
             f"runner SHA-256 mismatch: expected {expected_runner}, got {actual_runner}"
         )
 
+    expected_proton = protocol["proton"]["binary_sha256"].lower()
+    actual_proton = sha256_file(proton)
+    if actual_proton != expected_proton:
+        raise ValueError(
+            f"Proton SHA-256 mismatch: expected {expected_proton}, got {actual_proton}"
+        )
     expected_stockfish = protocol["stockfish"]["binary_sha256"].lower()
     actual_stockfish = sha256_file(stockfish)
     if actual_stockfish != expected_stockfish:

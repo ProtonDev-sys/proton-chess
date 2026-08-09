@@ -74,6 +74,9 @@ class MatchProtocolTests(unittest.TestCase):
                     "UCI_Elo": 3000,
                 },
             },
+            "proton": {
+                "binary_sha256": run_match_protocol.sha256_file(proton),
+            },
             "proton_options": {"Hash": 64, "UseBook": False, "HumanStyle": False},
             "pass_condition": {
                 "minimum_games": 400,
@@ -92,24 +95,26 @@ class MatchProtocolTests(unittest.TestCase):
             command = run_match_protocol.build_command(
                 protocol, root, proton, stockfish, root / "result.json"
             )
-        self.assertEqual(command[1], str(root / "tools" / "estimate_elo.py"))
-        self.assertEqual(command[2], str(proton))
-        self.assertEqual(command[3], str(stockfish))
-        expected_pairs = {
-            "--opponent-elo": "3000",
-            "--games": "400",
-            "--base-seconds": "60.0",
-            "--increment": "0.6",
-            "--watchdog-grace": "10.0",
-            "--max-plies": "600",
-            "--hash": "64",
-            "--seed": "20260809",
-            "--openings": str(openings),
-            "--json": str(root / "result.json"),
-        }
-        for flag, value in expected_pairs.items():
-            index = command.index(flag)
-            self.assertEqual(command[index + 1], value)
+            self.assertEqual(
+                Path(command[1]), (root / "tools" / "estimate_elo.py").resolve()
+            )
+            self.assertEqual(Path(command[2]), proton.resolve())
+            self.assertEqual(Path(command[3]), stockfish.resolve())
+            expected_pairs = {
+                "--opponent-elo": "3000",
+                "--games": "400",
+                "--base-seconds": "60.0",
+                "--increment": "0.6",
+                "--watchdog-grace": "10.0",
+                "--max-plies": "600",
+                "--hash": "64",
+                "--seed": "20260809",
+                "--openings": str(openings.resolve()),
+                "--json": str((root / "result.json").resolve()),
+            }
+            for flag, value in expected_pairs.items():
+                index = command.index(flag)
+                self.assertEqual(command[index + 1], value)
 
     def test_stockfish_hash_mismatch_stops_before_play(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -118,6 +123,17 @@ class MatchProtocolTests(unittest.TestCase):
             protocol = run_match_protocol.load_protocol(protocol_path)
             stockfish.write_bytes(b"different")
             with self.assertRaisesRegex(ValueError, "Stockfish SHA-256 mismatch"):
+                run_match_protocol.build_command(
+                    protocol, root, proton, stockfish, root / "result.json"
+                )
+
+    def test_proton_hash_mismatch_stops_before_play(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            protocol_path, proton, stockfish, _ = self.fixture(root)
+            protocol = run_match_protocol.load_protocol(protocol_path)
+            proton.write_bytes(b"different")
+            with self.assertRaisesRegex(ValueError, "Proton SHA-256 mismatch"):
                 run_match_protocol.build_command(
                     protocol, root, proton, stockfish, root / "result.json"
                 )
@@ -141,6 +157,16 @@ class MatchProtocolTests(unittest.TestCase):
             payload["games_per_level"] = 399
             protocol_path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "even number"):
+                run_match_protocol.load_protocol(protocol_path)
+
+    def test_missing_proton_hash_is_rejected_as_invalid_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            protocol_path, _, _, _ = self.fixture(root)
+            payload = json.loads(protocol_path.read_text(encoding="utf-8"))
+            del payload["proton"]["binary_sha256"]
+            protocol_path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Proton binary_sha256"):
                 run_match_protocol.load_protocol(protocol_path)
 
     def test_runner_hash_mismatch_stops_before_play(self) -> None:

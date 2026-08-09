@@ -51,6 +51,10 @@
       "UCI_Elo": 3000
     }
   },
+  "proton": {
+    "name": "Proton Chess",
+    "binary_sha256": "e7dbbe1fa290e804044c75cb2a86cb2308a7322ee8e50b2f4e321accd4ef697c"
+  },
   "proton_options": {
     "Hash": 64,
     "UseBook": false,

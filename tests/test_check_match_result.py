@@ -55,6 +55,7 @@ class CheckMatchResultTests(unittest.TestCase):
                     "UCI_Elo": 3000,
                 },
             },
+            "proton": {"binary_sha256": "proton"},
             "proton_options": {"Hash": 64, "UseBook": False, "HumanStyle": False},
             "pass_condition": {
                 "minimum_games": 400,
@@ -99,6 +100,7 @@ class CheckMatchResultTests(unittest.TestCase):
             "tool": {"sha256": "runner"},
             "openings": {"sha256": "openings"},
             "stockfish": {"sha256": "stockfish"},
+            "proton": {"sha256": "proton"},
             "proton_options": {"Hash": 64, "UseBook": False, "HumanStyle": False},
             "stockfish_options": {
                 "Hash": 64,
@@ -163,6 +165,35 @@ class CheckMatchResultTests(unittest.TestCase):
         )
         self.assertTrue(any("has illegal move e2e5" in error for error in errors))
         self.assertIn("Stockfish Elo 3000 reported score does not recompute", errors)
+
+    def test_boolean_point_is_rejected(self) -> None:
+        report = self.passing_report()
+        report["results"][0]["records"][0]["point"] = True
+        errors = check_match_result.validate_result(
+            self.protocol(), report, self.openings()
+        )
+        self.assertIn("Stockfish Elo 3000 record 1 has invalid point", errors)
+
+    def test_hash_comparisons_are_case_insensitive(self) -> None:
+        protocol = self.protocol()
+        protocol["runner"]["sha256"] = "RUNNER"
+        protocol["openings"]["sha256"] = "OPENINGS"
+        protocol["stockfish"]["binary_sha256"] = "STOCKFISH"
+        protocol["proton"]["binary_sha256"] = "PROTON"
+        self.assertEqual(
+            check_match_result.validate_result(
+                protocol, self.passing_report(), self.openings()
+            ),
+            [],
+        )
+
+    def test_proton_report_hash_mismatch_is_rejected(self) -> None:
+        report = self.passing_report()
+        report["proton"]["sha256"] = "different"
+        errors = check_match_result.validate_result(
+            self.protocol(), report, self.openings()
+        )
+        self.assertIn("Proton binary hash mismatch", errors)
 
     def test_dirty_tree_and_dependency_drift_are_rejected(self) -> None:
         report = self.passing_report()
