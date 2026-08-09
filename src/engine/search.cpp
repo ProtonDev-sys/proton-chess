@@ -190,9 +190,18 @@ void Search::store(std::uint64_t key, int depth, int score, int static_eval,
         }
     }
 
-    if (replacement->key == signature && replacement->bound != Bound::None &&
-        depth + 2 < replacement->depth && bound != Bound::Exact && move.is_null()) {
-        return;
+    const bool same_key = replacement->key == signature &&
+                          replacement->bound != Bound::None;
+    if (same_key) {
+        // A current move is still useful for ordering even when the new search
+        // is too shallow to replace the stored value. Keep the two decisions
+        // independent so a shallow bound cannot discard a deeper result.
+        if (!move.is_null()) replacement->move = move;
+
+        if (depth + 2 < replacement->depth && bound != Bound::Exact) {
+            replacement->generation = generation_;
+            return;
+        }
     }
 
     replacement->key = signature;
@@ -203,7 +212,9 @@ void Search::store(std::uint64_t key, int depth, int score, int static_eval,
     replacement->depth = static_cast<std::int8_t>(std::clamp(depth, -1, MaxPly - 2));
     replacement->bound = bound;
     replacement->generation = generation_;
-    if (!move.is_null() || replacement->move.is_null()) replacement->move = move;
+    if (!same_key || !move.is_null() || replacement->move.is_null()) {
+        replacement->move = move;
+    }
 }
 
 int Search::hashfull() const {
