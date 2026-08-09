@@ -28,8 +28,8 @@
 
 ## Repository routing
 
-- The original checkout at `C:\Users\proton\Documents\Development\Proton Chess` contains pre-existing uncommitted legacy work and remains untouched.
-- Active development uses the clean linked worktree at `C:\Users\proton\Documents\Development\Proton Chess Goal` so that work cannot be lost during the 0.2.0 architecture transition.
+- The original checkout contains pre-existing uncommitted legacy work and remains untouched.
+- Active development uses a clean linked worktree so that work cannot be lost during the 0.2.0 architecture transition.
 
 ## Next target
 
