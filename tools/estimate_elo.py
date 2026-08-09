@@ -77,6 +77,19 @@ class InputArtifact:
     sha256: str
 
 
+@dataclass(frozen=True)
+class UciEloRange:
+    minimum: int
+    maximum: int
+    default: int | None
+
+
+@dataclass(frozen=True)
+class OpponentLevel:
+    requested: int
+    effective: int
+
+
 @dataclass
 class GameOutcome:
     point: float
@@ -106,6 +119,7 @@ class GameRecord:
     moves: list[str]
     white_clock_seconds: float | None
     black_clock_seconds: float | None
+    proton_seed: str | None = None
 
 
 @dataclass
@@ -126,6 +140,7 @@ class MatchResult:
     score_ci95_high: float
     significant_above_50: bool
     records: list[GameRecord]
+    opponent_elo_requested: int | None = None
 
 
 @dataclass
@@ -150,6 +165,12 @@ class MatchReport:
     host: dict[str, Any]
     proton_options: dict[str, Any]
     stockfish_options: dict[str, Any]
+    proton_target_elo: int | None
+    proton_seed_derivation: str | None
+    stockfish_requested_elo: list[int]
+    stockfish_effective_elo: list[int]
+    proton_uci_elo_range: dict[str, int | None] | None
+    stockfish_uci_elo_range: dict[str, int | None]
     statistical_unit: str
     opening_selection: str
     confidence_level: float
@@ -167,6 +188,12 @@ PlayFunction = Callable[
     chess.engine.PlayResult,
 ]
 
+PROTON_SEED_DERIVATION = (
+    "SHA-256 of NUL-separated proton-human-seed-v1, match seed, Proton Elo, "
+    "effective opponent Elo, pair and Proton color; first 8 bytes as big-endian "
+    "unsigned integer; zero maps to one"
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -174,7 +201,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("proton", type=Path)
     parser.add_argument("stockfish", type=Path)
-    parser.add_argument("--opponent-elo", type=int, action="append", required=True)
+    parser.add_argument("--opponent-elo", type=int, action="append",
+                        help="requested Stockfish Elo; may be repeated")
+    parser.add_argument("--proton-elo", type=int,
+                        help="enable Proton's limiter at this target Elo")
     parser.add_argument("--games", type=int, default=20,
                         help="games per opponent level; rounded up to an even number")
     timing = parser.add_mutually_exclusive_group()
@@ -243,6 +273,52 @@ def select_openings(
     ]
 
 
+def derive_proton_seed(
+    match_seed: int,
+    proton_elo: int,
+    opponent_elo: int,
+    pair: int,
+    proton_color: str,
+) -> int:
+    if proton_color not in {"white", "black"}:
+        raise ValueError("Proton color must be white or black")
+    fields = (
+        "proton-human-seed-v1",
+        str(match_seed),
+        str(proton_elo),
+        str(opponent_elo),
+        str(pair),
+        proton_color,
+    )
+    digest = hashlib.sha256("\0".join(fields).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big") or 1
+
+
+def resolve_opponent_levels(
+    requested: list[int], elo_range: UciEloRange
+) -> list[OpponentLevel]:
+    if not requested:
+        raise ValueError("at least one opponent Elo is required")
+    levels: list[OpponentLevel] = []
+    seen: set[int] = set()
+    for rating in requested:
+        if rating <= 0:
+            raise ValueError("opponent Elo values must be positive")
+        if rating > elo_range.maximum:
+            raise ValueError(
+                f"requested Stockfish Elo {rating} exceeds its advertised maximum "
+                f"of {elo_range.maximum}"
+            )
+        effective = max(rating, elo_range.minimum)
+        if effective in seen:
+            raise ValueError(
+                f"multiple requested Stockfish levels resolve to Elo {effective}"
+            )
+        seen.add(effective)
+        levels.append(OpponentLevel(rating, effective))
+    return levels
+
+
 def logistic_elo(opponent_elo: int, score: float) -> float:
     score = min(0.999, max(0.001, score))
     return opponent_elo + 400.0 * math.log10(score / (1.0 - score))
@@ -298,7 +374,11 @@ def pentanomial_counts(pair_scores: list[float]) -> dict[str, int]:
     return counts
 
 
-def summarize_level(opponent_elo: int, records: list[GameRecord]) -> MatchResult:
+def summarize_level(
+    opponent_elo: int,
+    records: list[GameRecord],
+    opponent_elo_requested: int | None = None,
+) -> MatchResult:
     if not records:
         raise ValueError("cannot summarize an empty match level")
     points = [record.point for record in records]
@@ -324,6 +404,7 @@ def summarize_level(opponent_elo: int, records: list[GameRecord]) -> MatchResult
         score_ci95_high=ci_high,
         significant_above_50=ci_low > 0.5,
         records=list(records),
+        opponent_elo_requested=opponent_elo_requested,
     )
 
 
@@ -409,18 +490,72 @@ def identify_engine(path: Path) -> EngineArtifact:
     )
 
 
+def inspect_uci_elo_range(path: Path) -> UciEloRange:
+    engine = chess.engine.SimpleEngine.popen_uci(str(path))
+    try:
+        option = engine.options.get("UCI_Elo")
+        if (
+            option is None
+            or option.type != "spin"
+            or not isinstance(option.min, int)
+            or isinstance(option.min, bool)
+            or not isinstance(option.max, int)
+            or isinstance(option.max, bool)
+        ):
+            raise ValueError(f"{path} does not advertise a bounded UCI_Elo spin option")
+        default = (
+            option.default
+            if isinstance(option.default, int) and not isinstance(option.default, bool)
+            else None
+        )
+        return UciEloRange(option.min, option.max, default)
+    finally:
+        safe_quit(engine)
+
+
+def proton_options(hash_mb: int, proton_elo: int | None) -> dict[str, Any]:
+    options: dict[str, Any] = {
+        "Hash": hash_mb,
+        "UseBook": False,
+        "HumanStyle": False,
+    }
+    if proton_elo is not None:
+        options.update({
+            "UCI_Elo": proton_elo,
+            "UCI_LimitStrength": True,
+        })
+    return options
+
+
 def configure_engines(
     proton: chess.engine.SimpleEngine,
     stockfish: chess.engine.SimpleEngine,
     opponent_elo: int,
     hash_mb: int,
+    proton_elo: int | None = None,
+    proton_seed: int | None = None,
 ) -> None:
-    proton.configure({"Hash": hash_mb, "UseBook": False, "HumanStyle": False})
+    proton_configuration: dict[str, Any] = {
+        "Hash": hash_mb,
+        "UseBook": False,
+        "HumanStyle": False,
+    }
+    if proton_elo is not None:
+        if proton_seed is None:
+            raise ValueError("limited Proton play requires a deterministic seed")
+        proton_configuration.update({
+            "UCI_Elo": proton_elo,
+            "HumanSeed": str(proton_seed),
+            "UCI_LimitStrength": True,
+        })
+    elif proton_seed is not None:
+        raise ValueError("a Proton seed requires --proton-elo")
+    proton.configure(proton_configuration)
     stockfish.configure({
         "Hash": hash_mb,
         "Threads": 1,
-        "UCI_LimitStrength": True,
         "UCI_Elo": opponent_elo,
+        "UCI_LimitStrength": True,
     })
 
 
@@ -546,20 +681,47 @@ def run_level(
     args: argparse.Namespace,
     time_control: TimeControl,
     checkpoint: Callable[[MatchResult], None] | None = None,
+    *,
+    requested_opponent_elo: int | None = None,
 ) -> MatchResult:
     games = args.games + args.games % 2
     pair_count = games // 2
     selected = select_openings(openings, pair_count, args.seed + opponent_elo)
+    requested_elo = (
+        opponent_elo if requested_opponent_elo is None else requested_opponent_elo
+    )
+    target_elo = getattr(args, "proton_elo", None)
 
     points: list[float] = []
     records: list[GameRecord] = []
     for pair_index, (opening_index, opening) in enumerate(selected, start=1):
         for proton_is_white in (True, False):
+            proton_color = "white" if proton_is_white else "black"
+            proton_seed = None if target_elo is None else derive_proton_seed(
+                args.seed,
+                target_elo,
+                opponent_elo,
+                pair_index,
+                proton_color,
+            )
             proton = chess.engine.SimpleEngine.popen_uci(str(proton_path))
             stockfish = chess.engine.SimpleEngine.popen_uci(str(stockfish_path))
             try:
-                game_token = (args.seed, opponent_elo, pair_index, proton_is_white)
-                configure_engines(proton, stockfish, opponent_elo, args.hash)
+                game_token = (
+                    args.seed,
+                    target_elo,
+                    opponent_elo,
+                    pair_index,
+                    proton_color,
+                )
+                configure_engines(
+                    proton,
+                    stockfish,
+                    opponent_elo,
+                    args.hash,
+                    target_elo,
+                    proton_seed,
+                )
                 prepare_engine_for_game(proton, game_token)
                 prepare_engine_for_game(stockfish, game_token)
                 outcome = play_game(
@@ -578,7 +740,7 @@ def run_level(
             points.append(outcome.point)
             records.append(GameRecord(
                 pair=pair_index,
-                proton_color="white" if proton_is_white else "black",
+                proton_color=proton_color,
                 opening_index=opening_index,
                 opening_fen=opening.fen,
                 opening_moves=list(opening.moves),
@@ -588,19 +750,28 @@ def run_level(
                 moves=outcome.moves,
                 white_clock_seconds=outcome.white_clock_seconds,
                 black_clock_seconds=outcome.black_clock_seconds,
+                proton_seed=None if proton_seed is None else str(proton_seed),
             ))
             if checkpoint is not None:
-                checkpoint(summarize_level(opponent_elo, records))
+                checkpoint(summarize_level(
+                    opponent_elo,
+                    records,
+                    opponent_elo_requested=requested_elo,
+                ))
 
             print(
-                f"elo={opponent_elo} pair={pair_index}/{pair_count} "
-                f"proton={'white' if proton_is_white else 'black'} "
+                f"opponent={requested_elo}->{opponent_elo} "
+                f"pair={pair_index}/{pair_count} proton={proton_color} "
                 f"result={outcome.point:g} termination={outcome.termination} "
                 f"score={sum(points):g}/{len(points)}",
                 flush=True,
             )
 
-    return summarize_level(opponent_elo, records)
+    return summarize_level(
+        opponent_elo,
+        records,
+        opponent_elo_requested=requested_elo,
+    )
 
 
 def build_time_control(args: argparse.Namespace) -> TimeControl:
@@ -635,6 +806,26 @@ def main() -> int:
     if args.games < 2 or args.max_plies < 40 or args.hash < 1:
         raise ValueError("games, max-plies, or hash is outside its valid range")
 
+    target_elo = getattr(args, "proton_elo", None)
+    requested_opponent_elos = list(getattr(args, "opponent_elo", None) or [])
+    if not requested_opponent_elos and target_elo is not None:
+        requested_opponent_elos = [target_elo]
+    if not requested_opponent_elos:
+        raise ValueError("provide --opponent-elo or --proton-elo")
+
+    stockfish_elo_range = inspect_uci_elo_range(stockfish_path)
+    opponent_levels = resolve_opponent_levels(
+        requested_opponent_elos, stockfish_elo_range
+    )
+    proton_elo_range = None
+    if target_elo is not None:
+        proton_elo_range = inspect_uci_elo_range(proton_path)
+        if not proton_elo_range.minimum <= target_elo <= proton_elo_range.maximum:
+            raise ValueError(
+                f"requested Proton Elo {target_elo} is outside its advertised range "
+                f"{proton_elo_range.minimum}..{proton_elo_range.maximum}"
+            )
+
     time_control = build_time_control(args)
     openings = load_openings(openings_path)
     tool_path = Path(__file__).resolve()
@@ -664,13 +855,23 @@ def main() -> int:
             "processor": platform.processor(),
             "logical_cpu_count": os.cpu_count(),
         },
-        proton_options={"Hash": args.hash, "UseBook": False, "HumanStyle": False},
+        proton_options=proton_options(args.hash, target_elo),
         stockfish_options={
             "Hash": args.hash,
             "Threads": 1,
             "UCI_LimitStrength": True,
-            "UCI_Elo": list(args.opponent_elo),
+            "UCI_Elo": [level.effective for level in opponent_levels],
         },
+        proton_target_elo=target_elo,
+        proton_seed_derivation=(
+            PROTON_SEED_DERIVATION if target_elo is not None else None
+        ),
+        stockfish_requested_elo=[level.requested for level in opponent_levels],
+        stockfish_effective_elo=[level.effective for level in opponent_levels],
+        proton_uci_elo_range=(
+            asdict(proton_elo_range) if proton_elo_range is not None else None
+        ),
+        stockfish_uci_elo_range=asdict(stockfish_elo_range),
         statistical_unit="one color-swapped opening pair",
         opening_selection=(
             "seeded sample without replacement until the opening suite is exhausted; "
@@ -694,7 +895,7 @@ def main() -> int:
         write_json_atomic(json_path, asdict(report))
 
     completed_results: list[MatchResult] = []
-    for rating in args.opponent_elo:
+    for level in opponent_levels:
         def checkpoint(partial: MatchResult) -> None:
             report.results = [*completed_results, partial]
             assert json_path is not None
@@ -703,11 +904,12 @@ def main() -> int:
         result = run_level(
             proton_path,
             stockfish_path,
-            rating,
+            level.effective,
             openings,
             args,
             time_control,
             checkpoint=checkpoint if json_path is not None else None,
+            requested_opponent_elo=level.requested,
         )
         completed_results.append(result)
         report.results = list(completed_results)

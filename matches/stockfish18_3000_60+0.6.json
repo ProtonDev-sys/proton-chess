@@ -3,7 +3,7 @@
   "name": "stockfish18-3000-60+0.6-certification-v1",
   "runner": {
     "path": "tools/estimate_elo.py",
-    "sha256": "78e5c52003f0ca72f68446705a70a7275619d32d6eae55019e8f282a1bf8c2dd"
+    "sha256": "df6d62cf76bc3588b77177555c6ddd1234008aff49a5a1976308476bea9e26ee"
   },
   "python_chess_version": "1.11.2",
   "platform": {
@@ -53,7 +53,7 @@
   },
   "proton": {
     "name": "Proton Chess",
-    "binary_sha256": "65b416d42a1e6b634af15513db443714209b34ceed1ca7bf6a0cdb2e2cae6a0a"
+    "binary_sha256": "d90878c62b8c83b4d5610189428eef49e3e94eae2de0d3cfc4e99feef7d5eca9"
   },
   "proton_options": {
     "Hash": 64,

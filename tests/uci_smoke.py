@@ -209,6 +209,8 @@ def main() -> int:
                    for line in uci_lines)
         assert any("option name BookRandomness type spin default 0 min 0 max 100" in line
                    for line in uci_lines)
+        assert any("option name UCI_Elo type spin default 2800 min 800 max 3000" in line
+                   for line in uci_lines)
         assert not any("option name Backend" in line for line in uci_lines)
         assert not any("option name SyzygyPath" in line for line in uci_lines)
 

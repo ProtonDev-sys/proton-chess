@@ -149,6 +149,7 @@ class MatchProtocolTests(unittest.TestCase):
                 for flag, value in expected_pairs.items():
                     index = command.index(flag)
                     self.assertEqual(command[index + 1], value)
+                self.assertNotIn("--proton-elo", command)
             self.assertFalse(stage_root.exists())
 
     def test_stockfish_hash_mismatch_stops_before_play(self) -> None:
