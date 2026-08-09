@@ -16,7 +16,7 @@
 - The match runner accepts six-field FEN starts while retaining legacy UCI move-line openings. Pair identity includes the opening index, FEN and moves.
 - The Windows AMD64 manifest fixes 400 games, 200 color-swapped pairs, Stockfish 18 at `UCI_Elo=3000`, `60+0.6`, one thread, 64 MB hash, seed `20260809`, a 600-ply cap, exact engine options and a strict pair-score lower-bound gate.
 - Stockfish's official `stockfish-windows-x86-64.zip` SHA-256 is `40cc9758...81a139`; its executable and the locally used executable both hash to `9bde4202...6e8d6`.
-- The launcher verifies platform, clean Git state, runner hash, exact `chess==1.11.2`, both engine hashes, suite hash, legal/unique position count and duplicated protocol fields before starting.
+- The launcher validates the full protocol shape, verifies platform, clean Git state, runner hash, exact `chess==1.11.2`, both engine hashes, suite hash and legal/unique position count, then launches private staged copies of every verified input.
 - The checker replays exactly 400 raw game records, enforces the deterministic opening schedule and color swap, verifies clocks/terminations, and recomputes W/D/L, score, pair scores, pentanomial counts, Hoeffding bounds and the pass gate. Fabricated summaries, NaN values, wrong openings, incomplete pairs and dependency drift have focused regressions.
 - A real FEN smoke exercised a black-to-move UHO position through both colors.
 - A pre-final-manifest full-clock pair at `60+0.6` took 285.8 seconds and scored `0.5/2` for Proton: one checkmate loss and one threefold draw. Its one-pair interval is `[0, 1]`; it is not an Elo claim. The strict checker rejects it as 2/400, dirty-tree evidence and a pre-final suite-file hash.
