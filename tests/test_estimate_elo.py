@@ -43,17 +43,21 @@ class ScriptedPlayer:
 
 
 class EstimateEloTests(unittest.TestCase):
+    STARTING_OPENING = estimate_elo.OpeningPosition(chess.STARTING_FEN, [])
+
     @staticmethod
     def record(
         pair: int,
         color: str,
         point: float,
         opening_index: int = 7,
+        opening_fen: str = chess.STARTING_FEN,
     ) -> estimate_elo.GameRecord:
         return estimate_elo.GameRecord(
             pair=pair,
             proton_color=color,
             opening_index=opening_index,
+            opening_fen=opening_fen,
             opening_moves=["e2e4"],
             point=point,
             termination="test",
@@ -153,7 +157,7 @@ class EstimateEloTests(unittest.TestCase):
         outcome = estimate_elo.play_game(
             object(),
             object(),
-            [],
+            self.STARTING_OPENING,
             True,
             estimate_elo.TimeControl(None, 60.0, 0.6, 2.0),
             2,
@@ -183,7 +187,7 @@ class EstimateEloTests(unittest.TestCase):
         outcome = estimate_elo.play_game(
             object(),
             object(),
-            [],
+            self.STARTING_OPENING,
             True,
             estimate_elo.TimeControl(None, 60.0, 0.6, 2.0),
             2,
@@ -202,7 +206,7 @@ class EstimateEloTests(unittest.TestCase):
         outcome = estimate_elo.play_game(
             object(),
             object(),
-            [],
+            self.STARTING_OPENING,
             True,
             estimate_elo.TimeControl(None, 1.0, 0.6, 2.0),
             1,
@@ -221,7 +225,7 @@ class EstimateEloTests(unittest.TestCase):
         outcome = estimate_elo.play_game(
             object(),
             object(),
-            [],
+            self.STARTING_OPENING,
             True,
             estimate_elo.TimeControl(None, 1.0, 0.6, 2.0),
             1,
@@ -240,7 +244,7 @@ class EstimateEloTests(unittest.TestCase):
         outcome = estimate_elo.play_game(
             object(),
             object(),
-            [],
+            self.STARTING_OPENING,
             True,
             estimate_elo.TimeControl(0.05, None, 0.0, 2.0),
             1,
@@ -252,14 +256,53 @@ class EstimateEloTests(unittest.TestCase):
         self.assertIsNone(outcome.white_clock_seconds)
         self.assertEqual(player.calls[0][1].time, 0.05)
 
+    def test_black_to_move_fen_starts_with_black(self) -> None:
+        player = ScriptedPlayer(["e7e5", "e2e4"])
+        moments = iter((0.0, 0.01, 0.01, 0.02))
+        opening = estimate_elo.OpeningPosition(
+            f"{chess.STARTING_BOARD_FEN} b KQkq - 0 1", []
+        )
+        outcome = estimate_elo.play_game(
+            object(),
+            object(),
+            opening,
+            True,
+            estimate_elo.TimeControl(0.05, None, 0.0, 2.0),
+            3,
+            object(),
+            player=player,
+            clock=lambda: next(moments),
+        )
+        self.assertEqual(outcome.moves, ["e7e5", "e2e4"])
+        self.assertEqual(outcome.plies, 3)
+        self.assertEqual(outcome.termination, "move limit")
+
     def test_opening_schedule_is_deterministic_and_copied(self) -> None:
-        openings = [["e2e4"], ["d2d4"], ["c2c4"]]
+        openings = [
+            estimate_elo.OpeningPosition(chess.STARTING_FEN, [move])
+            for move in ("e2e4", "d2d4", "c2c4")
+        ]
         first = estimate_elo.select_openings(openings, 5, 17)
         second = estimate_elo.select_openings(openings, 5, 17)
         self.assertEqual(first, second)
         self.assertEqual(len(first), 5)
-        first[0][1].append("e7e5")
-        self.assertEqual(openings[first[0][0]], [first[0][1][0]])
+        first[0][1].moves.append("e7e5")
+        self.assertEqual(len(openings[first[0][0]].moves), 1)
+
+    def test_opening_loader_accepts_fen_and_legacy_move_lines(self) -> None:
+        fen = "rnbqkbnr/ppp1pppp/8/3p4/8/2N5/PPPPPPPP/R1BQKBNR w KQkq - 0 2"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "mixed.epd"
+            path.write_text(
+                f"# mixed test\n{fen}\nlegacy|e2e4 e7e5\nnot a position\n",
+                encoding="utf-8",
+            )
+            openings = estimate_elo.load_openings(path)
+        self.assertEqual(len(openings), 2)
+        self.assertEqual(openings[0].fen, fen)
+        self.assertEqual(openings[0].moves, [])
+        self.assertEqual(openings[1].fen, chess.STARTING_FEN)
+        self.assertEqual(openings[1].moves, ["e2e4", "e7e5"])
 
     def test_distinct_games_can_use_distinct_lifecycle_tokens(self) -> None:
         player = ScriptedPlayer(["e2e4", "e2e4"])
@@ -269,7 +312,7 @@ class EstimateEloTests(unittest.TestCase):
         for token in (token_a, token_b):
             moments = iter((0.0, 0.001))
             estimate_elo.play_game(
-                object(), object(), [], True, control, 1, token,
+                object(), object(), self.STARTING_OPENING, True, control, 1, token,
                 player=player, clock=lambda moments=moments: next(moments))
         self.assertIs(player.calls[0][0], token_a)
         self.assertIs(player.calls[1][0], token_b)
@@ -329,6 +372,19 @@ class EstimateEloTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different openings"):
             estimate_elo.complete_pair_scores(records)
 
+    def test_pair_validation_rejects_same_index_with_different_fens(self) -> None:
+        records = [
+            self.record(1, "white", 0.5, opening_fen=chess.STARTING_FEN),
+            self.record(
+                1,
+                "black",
+                0.5,
+                opening_fen=f"{chess.STARTING_BOARD_FEN} b KQkq - 0 1",
+            ),
+        ]
+        with self.assertRaisesRegex(ValueError, "different openings"):
+            estimate_elo.complete_pair_scores(records)
+
     def test_summary_rejects_invalid_game_points(self) -> None:
         with self.assertRaisesRegex(ValueError, "game points"):
             estimate_elo.summarize_level(3000, [self.record(1, "white", 0.25)])
@@ -352,7 +408,7 @@ class EstimateEloTests(unittest.TestCase):
                 Path("proton"),
                 Path("stockfish"),
                 3000,
-                [["e2e4"]],
+                [estimate_elo.OpeningPosition(chess.STARTING_FEN, ["e2e4"])],
                 args,
                 estimate_elo.TimeControl(0.01, None, 0.0, 1.0),
                 checkpoint=checkpoints.append,
@@ -403,7 +459,7 @@ class EstimateEloTests(unittest.TestCase):
                 proton_path: Path,
                 stockfish_path: Path,
                 rating: int,
-                opening_lines: list[list[str]],
+                opening_lines: list[estimate_elo.OpeningPosition],
                 parsed_args: Namespace,
                 time_control: estimate_elo.TimeControl,
                 checkpoint: object = None,
