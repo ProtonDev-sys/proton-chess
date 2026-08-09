@@ -31,3 +31,23 @@ python tools/compare_engines.py build/Release/proton_chess.exe C:\path\to\baseli
 The report contains both binary hashes, both UCI identities, the exact option map, opening and tool hashes, every move, pair scores, pentanomial counts, a conservative score interval, an estimated relative Elo delta and an exact paired sign-flip result. It does not assign either engine an absolute Elo.
 
 This tool is deliberately separate from the pinned Stockfish certification runner. Changes to A/B reporting cannot silently change the certification protocol or its runner hash.
+
+## Deterministic search comparison
+
+Use `compare_search.py` before spending time on games. It runs the same positions through two Proton binaries with fresh processes on every trial, clears search state before every FEN, alternates which engine goes first and rejects a run if either binary changes its answer between trials.
+
+For a fixed-depth tree comparison:
+
+```powershell
+python tools/compare_search.py build/Release/proton_chess.exe C:\path\to\baseline.exe --candidate-label candidate --baseline-label main --openings openings/uho_lichess_4852_v1_200.epd --depth 10 --hash 16 --trials 4 --timeout 120 --json build/bench/candidate-depth10.json
+```
+
+The report pins both binaries, the opening file and the tool by SHA-256. It records best move, score, completed depth, selective depth, nodes, engine time and the reported principal variation for every search. Node totals from fixed-depth runs are suitable for comparing deterministic tree size when both revisions use the same node-counting boundaries. Engine and wall times are host-specific supporting measurements.
+
+Fixed-node mode answers a different question: what line does each engine finish under the same requested node cap?
+
+```powershell
+python tools/compare_search.py build/Release/proton_chess.exe C:\path\to\baseline.exe --openings openings/uho_lichess_4852_v1_200.epd --nodes 25000 --hash 16 --trials 2 --timeout 60 --json build/bench/candidate-nodes25000.json
+```
+
+Proton prints `info nodes` after completed iterative-deepening passes. If a node cap interrupts the next pass, the last reported count is not the total consumed against the cap. The tool therefore records that count for repeatability but deliberately omits node-efficiency deltas in fixed-node mode.
