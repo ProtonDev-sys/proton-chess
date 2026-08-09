@@ -78,6 +78,35 @@ class EngineProcess:
             raise AssertionError(f"engine exited with {self.process.returncode}: {stderr}")
 
 
+def check_immediate_stop(binary: Path) -> None:
+    """Exercise cancellation before the search worker can emit any output."""
+    commands = ["uci", "isready"]
+    normal_searches = 16
+    ponder_searches = 4
+    for _ in range(normal_searches):
+        commands.extend(("position startpos", "go infinite", "stop"))
+    for _ in range(ponder_searches):
+        commands.extend(("position startpos", "go ponder infinite", "stop"))
+    commands.append("quit")
+
+    try:
+        result = subprocess.run(
+            [str(binary)],
+            input="\n".join(commands) + "\n",
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError("immediate stop did not terminate the search worker") from error
+
+    assert result.returncode == 0, result.stderr
+    bestmoves = [line for line in result.stdout.splitlines() if line.startswith("bestmove ")]
+    expected = normal_searches + ponder_searches
+    assert len(bestmoves) == expected, (len(bestmoves), result.stdout)
+    assert all(line.split()[1] != "0000" for line in bestmoves), bestmoves
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: uci_smoke.py /path/to/proton_chess", file=sys.stderr)
@@ -86,6 +115,8 @@ def main() -> int:
     binary = Path(sys.argv[1]).resolve()
     if not binary.is_file():
         raise FileNotFoundError(binary)
+
+    check_immediate_stop(binary)
 
     engine = EngineProcess(binary)
     try:
