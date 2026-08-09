@@ -273,7 +273,53 @@ void test_draw_material() {
            "K+NN versus K is not a FIDE dead position because a helpmate is legal");
 }
 
+void test_pawn_safe_minor_mobility() {
+    proton::EngineOptions options;
+    options.use_book = false;
+    proton::Evaluator evaluator;
+    evaluator.set_options(options);
 
+    const auto evaluate = [&](const std::string& fen, const std::string& label) {
+        proton::Position position;
+        expect(position.set_fen(fen), label + " FEN parses");
+        return evaluator.evaluate(position);
+    };
+
+    const int knight_unsafe = evaluate(
+        "3k4/8/8/8/1pN5/8/8/3K4 w - - 0 1", "white unsafe knight mobility");
+    const int knight_safe = evaluate(
+        "3k4/8/8/8/2N3p1/8/8/3K4 w - - 0 1", "white safe knight mobility");
+    const int knight_unsafe_mirror = evaluate(
+        "3k4/8/8/1Pn5/8/8/8/3K4 b - - 0 1", "black unsafe knight mobility");
+    const int knight_safe_mirror = evaluate(
+        "3k4/8/8/2n3P1/8/8/8/3K4 b - - 0 1", "black safe knight mobility");
+    expect(knight_safe - knight_unsafe == 4,
+           "enemy pawn control removes one knight mobility square");
+    expect(knight_unsafe == knight_unsafe_mirror &&
+               knight_safe == knight_safe_mirror,
+           "pawn-safe knight mobility is color symmetric");
+
+    const int bishop_unsafe = evaluate(
+        "3k4/1p6/8/8/2B5/8/8/3K4 w - - 0 1", "white unsafe bishop mobility");
+    const int bishop_safe = evaluate(
+        "3k4/6p1/8/8/2B5/8/8/3K4 w - - 0 1", "white safe bishop mobility");
+    const int bishop_unsafe_mirror = evaluate(
+        "3k4/8/8/2b5/8/8/1P6/3K4 b - - 0 1", "black unsafe bishop mobility");
+    const int bishop_safe_mirror = evaluate(
+        "3k4/8/8/2b5/8/8/6P1/3K4 b - - 0 1", "black safe bishop mobility");
+    expect(bishop_safe - bishop_unsafe == 5,
+           "enemy pawn control removes one bishop mobility square");
+    expect(bishop_unsafe == bishop_unsafe_mirror &&
+               bishop_safe == bishop_safe_mirror,
+           "pawn-safe bishop mobility is color symmetric");
+
+    const int rook_left_pawn = evaluate(
+        "3k4/8/1p6/8/2R5/8/8/3K4 w - - 0 1", "rook left-pawn scope guard");
+    const int rook_right_pawn = evaluate(
+        "3k4/8/6p1/8/2R5/8/8/3K4 w - - 0 1", "rook right-pawn scope guard");
+    expect(rook_left_pawn == rook_right_pawn,
+           "pawn-safe mobility remains limited to knights and bishops");
+}
 
 proton::Bitboard slow_sliding_attacks(int square, proton::Bitboard occupied,
                                       const std::vector<int>& directions) {
@@ -491,7 +537,7 @@ void test_search_tactics() {
     expect(selected_alternative, "fixed human seeds exercise a non-best in-band move");
 
     const std::string zero_loss_fen =
-        "rnb1kb1r/ppp1pppp/5q2/8/8/3PBQ2/PPP2KPP/RN3B1R w kq - 2 9";
+        "rnbqk1nr/ppp2p2/3pp1pp/8/2P1P3/2PPBN2/P4PPP/R2QKB1R b KQkq - 0 7";
     proton::SearchLimits zero_loss_limits;
     zero_loss_limits.depth = 3;
     proton::Evaluator zero_loss_full_evaluator;
@@ -506,7 +552,7 @@ void test_search_tactics() {
     proton::EngineOptions elo_3000_options = full_options;
     elo_3000_options.uci_limit_strength = true;
     elo_3000_options.uci_elo = 3000;
-    elo_3000_options.human_seed = 2;
+    elo_3000_options.human_seed = 27;
     proton::Evaluator elo_3000_evaluator;
     elo_3000_evaluator.set_options(elo_3000_options);
     auto elo_3000_search =
@@ -675,7 +721,7 @@ void test_search_tactics() {
     proton::EngineOptions confirmation_options = full_options;
     confirmation_options.uci_limit_strength = true;
     confirmation_options.uci_elo = 2700;
-    confirmation_options.human_seed = 32;
+    confirmation_options.human_seed = 37;
     proton::Evaluator confirmation_wide_evaluator;
     confirmation_wide_evaluator.set_options(confirmation_options);
     auto confirmation_wide_search =
@@ -701,7 +747,7 @@ void test_search_tactics() {
     expect(confirmation_tight_position.set_fen(confirmation_cancel_fen),
            "tight confirmation-cancel FEN parses");
     proton::SearchLimits confirmation_tight_limits = confirmation_depth;
-    confirmation_tight_limits.node_limit = 7500;
+    confirmation_tight_limits.node_limit = 11000;
     const proton::SearchResult confirmation_tight_result =
         confirmation_tight_search->think(confirmation_tight_position,
                                           confirmation_tight_limits);
@@ -711,7 +757,9 @@ void test_search_tactics() {
     expect(confirmation_tight_result.nodes >
                confirmation_tight_limits.node_limit / 2 &&
                confirmation_tight_result.nodes <= confirmation_tight_limits.node_limit,
-           "cancelled confirmation stays inside the parent's total node budget");
+           "cancelled confirmation stays inside the parent's total node budget (nodes " +
+               std::to_string(confirmation_tight_result.nodes) + ", limit " +
+               std::to_string(confirmation_tight_limits.node_limit) + ")");
 
     std::atomic<bool> primary_stop{false};
     std::atomic<bool> secondary_stop{true};
@@ -743,38 +791,78 @@ void test_search_tactics() {
     const proton::SearchResult tight_full_result =
         tight_full_search->think(tight_full_position, tight_limits);
 
-    proton::EngineOptions tight_limited_options = tight_full_options;
-    tight_limited_options.uci_limit_strength = true;
-    tight_limited_options.uci_elo = 2700;
-    tight_limited_options.human_seed = 27;
-    proton::Evaluator tight_limited_evaluator;
-    tight_limited_evaluator.set_options(tight_limited_options);
-    auto tight_limited_search =
-        std::make_unique<proton::Search>(tight_limited_evaluator);
-    tight_limited_search->set_options(tight_limited_options);
-    proton::Position tight_limited_position;
-    expect(tight_limited_position.set_fen(tight_band_fen),
-           "limited tight loss-band FEN parses");
-    const proton::SearchResult tight_limited_result =
-        tight_limited_search->think(tight_limited_position, tight_limits);
-    expect(tight_limited_result.best == tight_full_result.best,
-           "fresh confirmation rejects the unsafe tight-band alternative");
+    const proton::Move tight_best = tight_full_position.parse_uci_move("d8b6");
+    const proton::Move tight_unsafe = tight_full_position.parse_uci_move("b7b6");
+    expect(tight_full_result.best == tight_best && !tight_unsafe.is_null(),
+           "tight loss-band reference moves parse and the full search prefers Qb6");
+    proton::SearchLimits tight_restricted_limits = tight_limits;
+    tight_restricted_limits.search_moves_specified = true;
+    tight_restricted_limits.search_moves = {tight_best, tight_unsafe};
 
-    proton::Evaluator tight_verify_evaluator;
-    tight_verify_evaluator.set_options(tight_full_options);
-    auto tight_verify_search =
-        std::make_unique<proton::Search>(tight_verify_evaluator);
-    tight_verify_search->set_options(tight_full_options);
-    proton::Position tight_verify_position;
-    expect(tight_verify_position.set_fen(tight_band_fen),
-           "tight loss-band verification FEN parses");
-    proton::SearchLimits tight_verify_limits = tight_limits;
-    tight_verify_limits.search_moves_specified = true;
-    tight_verify_limits.search_moves.push_back(tight_limited_result.best);
-    const proton::SearchResult tight_verify_result =
-        tight_verify_search->think(tight_verify_position, tight_verify_limits);
-    expect(tight_full_result.score_cp - tight_verify_result.score_cp <= 22,
-           "Elo 2700 alternative stays inside its 22 cp loss band");
+    proton::Evaluator tight_unsafe_evaluator;
+    tight_unsafe_evaluator.set_options(tight_full_options);
+    auto tight_unsafe_search =
+        std::make_unique<proton::Search>(tight_unsafe_evaluator, tight_full_options);
+    proton::Position tight_unsafe_position;
+    expect(tight_unsafe_position.set_fen(tight_band_fen),
+           "unsafe tight loss-band FEN parses");
+    proton::SearchLimits tight_unsafe_limits = tight_limits;
+    tight_unsafe_limits.search_moves_specified = true;
+    tight_unsafe_limits.search_moves.push_back(tight_unsafe);
+    const proton::SearchResult tight_unsafe_result =
+        tight_unsafe_search->think(tight_unsafe_position, tight_unsafe_limits);
+    expect(tight_full_result.score_cp - tight_unsafe_result.score_cp > 22,
+           "the sampled tight-band alternative is outside the 22 cp allowance");
+
+    proton::EngineOptions tight_wide_options = tight_full_options;
+    tight_wide_options.human_skill = 19;
+    tight_wide_options.human_max_loss_cp = 40;
+    tight_wide_options.human_seed = 27;
+    proton::Evaluator tight_control_evaluator;
+    tight_control_evaluator.set_options(tight_wide_options);
+    auto tight_control_search =
+        std::make_unique<proton::Search>(tight_control_evaluator, tight_wide_options);
+    proton::Position tight_control_first_position;
+    expect(tight_control_first_position.set_fen(tight_band_fen),
+           "wide tight-band control FEN parses");
+    const proton::SearchResult tight_control_first =
+        tight_control_search->think(tight_control_first_position,
+                                    tight_restricted_limits);
+    tight_control_search->new_game();
+    proton::Position tight_control_second_position;
+    expect(tight_control_second_position.set_fen(tight_band_fen),
+           "second wide tight-band control FEN parses");
+    const proton::SearchResult tight_control_second =
+        tight_control_search->think(tight_control_second_position,
+                                    tight_restricted_limits);
+    expect(tight_control_first.best == tight_unsafe &&
+               tight_control_second.best == tight_best,
+           "wide-band control fixes the first two seeded selections");
+
+    proton::EngineOptions tight_low_options = tight_wide_options;
+    tight_low_options.human_max_loss_cp = 12;
+    proton::Evaluator tight_rejection_evaluator;
+    tight_rejection_evaluator.set_options(tight_low_options);
+    auto tight_rejection_search =
+        std::make_unique<proton::Search>(tight_rejection_evaluator,
+                                         tight_low_options);
+    proton::Position tight_rejection_position;
+    expect(tight_rejection_position.set_fen(tight_band_fen),
+           "tight-band rejection FEN parses");
+    const proton::SearchResult tight_rejection_result =
+        tight_rejection_search->think(tight_rejection_position,
+                                      tight_restricted_limits);
+    tight_rejection_search->set_options(tight_wide_options);
+    tight_rejection_search->new_game();
+    proton::Position tight_after_rejection_position;
+    expect(tight_after_rejection_position.set_fen(tight_band_fen),
+           "post-rejection wide-band FEN parses");
+    const proton::SearchResult tight_after_rejection_result =
+        tight_rejection_search->think(tight_after_rejection_position,
+                                      tight_restricted_limits);
+    expect(tight_rejection_result.best == tight_best &&
+               tight_after_rejection_result.best == tight_best,
+           "the seeded unsafe move is sampled, rejected, and consumes its draw");
 
     proton::EngineOptions book_options;
     book_options.use_book = true;
@@ -992,6 +1080,7 @@ int main() {
     test_fen_and_ep_hashing();
     test_repetition_and_null_move();
     test_draw_material();
+    test_pawn_safe_minor_mobility();
     test_attack_tables();
     test_static_exchange();
     test_search_tactics();

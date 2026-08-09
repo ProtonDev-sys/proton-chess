@@ -276,7 +276,11 @@ int CoreEvalNet::evaluate(const Position& position) const {
 
                 const Bitboard piece_map = piece_attacks(position, type, square, color);
                 attack_map[color] |= piece_map;
-                const int mobility = std::popcount(piece_map & ~own);
+                Bitboard mobility_map = piece_map & ~own;
+                if (type == Knight || type == Bishop) {
+                    mobility_map &= ~pawn_attacks[opposite(color)];
+                }
+                const int mobility = std::popcount(mobility_map);
                 switch (type) {
                 case Knight:
                     mg_square += mobility * 4;
