@@ -2,13 +2,29 @@
 
 - Automation ID: `proton-human-strength`
 - Goal: human-style, selectable-strength engine with a statistically significant match win over Stockfish at `UCI_Elo=3000`
-- Last run: `2026-08-09T05:32:48+01:00`
+- Last run: `2026-08-09T05:53:48+01:00`
 - Status: `passed`
-- Change kept: detect shallow quiet mate-in-one at the quiescence horizon
-- Active branch: `agent/fix-quiet-mate-horizon`
-- Base: `origin/main` at `835224a`
+- Change kept: real Fischer clocks, isolated game lifecycle, watchdogs, and match provenance
+- Active branch: `agent/fischer-match-lifecycle`
+- Base: `origin/main` at `35f9f69`
 
 ## Latest evidence
+
+- `tools/estimate_elo.py` now accepts `--base-seconds 60 --increment 0.6` while retaining legacy fixed movetime.
+- Each game uses fresh engine processes and a distinct token. `ucinewgame` and `isready` complete before the chess clock starts.
+- Wall-clock time is deducted before increment. Exact zero and negative remaining time both flag; an increment cannot rescue a flagged move.
+- Clock-only UCI searches run through an external watchdog. A stuck command is cancelled and its engine process is closed.
+- The report schema records engine IDs, hashes and options; opening/tool hashes; raw moves; opening indices; clocks; terminations; Git revision/dirty state; Python versions; and host details.
+- Removed the old unpaired confidence interval because it produced false zero-width intervals for all-draw samples. Pair-aware inference is the next separate change.
+- Added nine focused match-tool tests. CMake runs them when python-chess is installed and skips them cleanly otherwise.
+- Real Stockfish-3000 smoke:
+  - two paired games at `0.2+0.02`, both completed to the 40-ply smoke cap with clock/provenance records;
+  - two legacy fixed-movetime games also completed to the cap;
+  - no lingering engine process remained.
+- Full canonical validation and 3/3 CTest targets passed.
+- This is match infrastructure, not a strength claim.
+
+## Previous run: quiet-mate horizon
 
 - Target FEN: `3r2k1/ppB2pp1/6b1/7p/1n1Pq3/2Q3P1/PP3P1P/2KR3R w - - 1 22`.
 - Before the change, restricted `c3b4` at depth 1 scored `+617` in 2 nodes with PV `c3b4`; depth 2 found `c3b4 e4c2` as mate against Proton in 102 nodes.
@@ -66,7 +82,7 @@
 
 ## Next target
 
-- Establish the pinned Stockfish-3000 match protocol and a trustworthy 60+0.6 baseline on 0.2.0.
-- Replace the estimator's invalid zero-variance confidence interval with pair-aware statistics and record complete match provenance.
+- Add pair-aware confidence intervals and incremental JSON checkpoints for long matches.
+- Pin a neutral opening suite and the exact Stockfish-3000 `60+0.6` protocol, then run the first trustworthy baseline.
 - Repair the current human move selector and UCI Elo mapping before extending the advertised 2800 ceiling.
 - Keep future engine changes only with focused regressions, canonical validation, and paired before/after strength evidence.
