@@ -811,11 +811,14 @@ void test_search_tactics() {
     tight_unsafe_limits.search_moves.push_back(tight_unsafe);
     const proton::SearchResult tight_unsafe_result =
         tight_unsafe_search->think(tight_unsafe_position, tight_unsafe_limits);
-    expect(tight_full_result.score_cp - tight_unsafe_result.score_cp > 22,
-           "the sampled tight-band alternative is outside the 22 cp allowance");
+    const int tight_unsafe_loss =
+        tight_full_result.score_cp - tight_unsafe_result.score_cp;
+    expect(tight_unsafe_loss == 36,
+           "the sampled alternative loses 36 cp, outside the 22 cp allowance");
 
     proton::EngineOptions tight_wide_options = tight_full_options;
     tight_wide_options.human_skill = 19;
+    // Skill 19 adds 8 + 2 cp, so this produces a 50 cp effective allowance.
     tight_wide_options.human_max_loss_cp = 40;
     tight_wide_options.human_seed = 27;
     proton::Evaluator tight_control_evaluator;
@@ -840,6 +843,7 @@ void test_search_tactics() {
            "wide-band control fixes the first two seeded selections");
 
     proton::EngineOptions tight_low_options = tight_wide_options;
+    // The same skill adjustment makes this effective allowance 12 + 8 + 2 = 22 cp.
     tight_low_options.human_max_loss_cp = 12;
     proton::Evaluator tight_rejection_evaluator;
     tight_rejection_evaluator.set_options(tight_low_options);
