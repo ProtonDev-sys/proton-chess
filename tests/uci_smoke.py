@@ -107,6 +107,88 @@ def check_immediate_stop(binary: Path) -> None:
     assert all(line.split()[1] != "0000" for line in bestmoves), bestmoves
 
 
+def fixed_depth_move(binary: Path, options: list[str]) -> str:
+    engine = EngineProcess(binary)
+    try:
+        engine.send("uci")
+        engine.wait_for(lambda line: line == "uciok")
+        engine.send("isready")
+        engine.wait_for(lambda line: line == "readyok")
+        for option in options:
+            engine.send(option)
+        engine.send("position startpos")
+        engine.send("go depth 4")
+        bestmove, _ = engine.wait_for(
+            lambda line: line.startswith("bestmove "), timeout=10
+        )
+        return bestmove.split()[1]
+    finally:
+        engine.close()
+
+
+def check_limiter_option_state(binary: Path) -> None:
+    seed = "setoption name HumanSeed value 27"
+    fresh = fixed_depth_move(binary, [seed])
+    replayed_defaults = fixed_depth_move(binary, [
+        "setoption name Hash value 64",
+        "setoption name Threads value 1",
+        "setoption name UseBook value true",
+        "setoption name BookFile value openings/book_lines.txt",
+        "setoption name BookRandomness value 0",
+        "setoption name UCI_LimitStrength value false",
+        "setoption name UCI_Elo value 2800",
+        "setoption name Skill Level value 20",
+        "setoption name HumanStyle value false",
+        "setoption name HumanSkill value 20",
+        "setoption name HumanMaxLossCp value 12",
+        "setoption name HumanSeed value 0",
+        "setoption name MoveOverhead value 25",
+        "setoption name Contempt value 0",
+        seed,
+    ])
+    skill_round_trip = fixed_depth_move(binary, [
+        "setoption name HumanSkill value 0",
+        "setoption name HumanSkill value 20",
+        seed,
+    ])
+    disabled_uci_elo = fixed_depth_move(binary, [
+        "setoption name UCI_Elo value 800",
+        seed,
+    ])
+    assert replayed_defaults == fresh, (fresh, replayed_defaults)
+    assert skill_round_trip == fresh, (fresh, skill_round_trip)
+    assert disabled_uci_elo == fresh, (fresh, disabled_uci_elo)
+
+    custom = [
+        "setoption name HumanStyle value true",
+        "setoption name HumanSkill value 0",
+        "setoption name HumanMaxLossCp value 250",
+    ]
+    sensitivity_exercised = False
+    for seed_value in (1, 7, 27, 42, 99):
+        custom_seed = f"setoption name HumanSeed value {seed_value}"
+        custom_move = fixed_depth_move(binary, custom + [custom_seed])
+        overwritten_move = fixed_depth_move(binary, [
+            "setoption name HumanStyle value true",
+            "setoption name HumanSkill value 20",
+            "setoption name HumanMaxLossCp value 8",
+            custom_seed,
+        ])
+        after_disabled_uci_elo = fixed_depth_move(
+            binary,
+            custom + ["setoption name UCI_Elo value 2800", custom_seed],
+        )
+        assert after_disabled_uci_elo == custom_move, (
+            seed_value,
+            custom_move,
+            after_disabled_uci_elo,
+        )
+        sensitivity_exercised = sensitivity_exercised or (
+            custom_move != fresh and custom_move != overwritten_move
+        )
+    assert sensitivity_exercised
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: uci_smoke.py /path/to/proton_chess", file=sys.stderr)
@@ -117,6 +199,7 @@ def main() -> int:
         raise FileNotFoundError(binary)
 
     check_immediate_stop(binary)
+    check_limiter_option_state(binary)
 
     engine = EngineProcess(binary)
     try:

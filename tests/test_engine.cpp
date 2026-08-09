@@ -1,5 +1,7 @@
+#include <atomic>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <string>
 #include <utility>
@@ -329,7 +331,171 @@ void test_search_tactics() {
     expect(human_mate.in_check(human_mate.side_to_move()) && replies.empty(),
            "human mode never randomises away a forced mate");
 
+    const std::string loss_band_fen =
+        "3rk3/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 w - - 0 1";
+    proton::EngineOptions full_options;
+    full_options.use_book = false;
+    full_options.hash_mb = 1;
+    full_options.uci_elo = 800;
+    proton::Evaluator full_evaluator;
+    full_evaluator.set_options(full_options);
+    auto full_search = std::make_unique<proton::Search>(full_evaluator);
+    full_search->set_options(full_options);
+    proton::Position loss_band_position;
+    expect(loss_band_position.set_fen(loss_band_fen), "human loss-band FEN parses");
+    proton::SearchLimits loss_band_limits;
+    loss_band_limits.depth = 4;
+    const proton::SearchResult full_result =
+        full_search->think(loss_band_position, loss_band_limits);
+
+    const auto exact_score_for = [&](const proton::Move& selected) {
+        proton::EngineOptions verify_options;
+        verify_options.use_book = false;
+        verify_options.hash_mb = 1;
+        proton::Evaluator verify_evaluator;
+        verify_evaluator.set_options(verify_options);
+        auto verify_search = std::make_unique<proton::Search>(verify_evaluator);
+        verify_search->set_options(verify_options);
+        proton::Position verify_position;
+        expect(verify_position.set_fen(loss_band_fen), "loss-band verification FEN parses");
+        proton::SearchLimits verify_limits;
+        verify_limits.depth = 4;
+        verify_limits.search_moves_specified = true;
+        verify_limits.search_moves.push_back(selected);
+        return verify_search->think(verify_position, verify_limits).score_cp;
+    };
+
+    bool selected_alternative = false;
+    for (const std::uint64_t seed : std::vector<std::uint64_t>{1, 7, 27, 42, 99}) {
+        proton::EngineOptions limited_options = full_options;
+        limited_options.uci_limit_strength = true;
+        limited_options.human_seed = seed;
+        proton::Evaluator limited_evaluator;
+        limited_evaluator.set_options(limited_options);
+        auto limited_search = std::make_unique<proton::Search>(limited_evaluator);
+        limited_search->set_options(limited_options);
+        proton::Position limited_position;
+        expect(limited_position.set_fen(loss_band_fen), "limited loss-band FEN parses");
+        const proton::SearchResult limited_result =
+            limited_search->think(limited_position, loss_band_limits);
+        selected_alternative = selected_alternative || limited_result.best != full_result.best;
+        const int verified_score = exact_score_for(limited_result.best);
+        expect(full_result.score_cp - verified_score <= 700,
+               "every human candidate stays inside its 700 cp loss band (seed " +
+                   std::to_string(seed) + ", move " + limited_result.best.to_uci() + ")");
+    }
+    expect(selected_alternative, "fixed human seeds exercise a non-best in-band move");
+
+    proton::EngineOptions interrupted_options = full_options;
+    interrupted_options.uci_limit_strength = true;
+    interrupted_options.human_seed = 27;
+    proton::Evaluator interrupted_evaluator;
+    interrupted_evaluator.set_options(interrupted_options);
+    auto interrupted_search = std::make_unique<proton::Search>(interrupted_evaluator);
+    interrupted_search->set_options(interrupted_options);
+    proton::Position interrupted_position;
+    expect(interrupted_position.set_fen(loss_band_fen),
+           "interrupted loss-band FEN parses");
+    proton::SearchLimits interrupted_limits = loss_band_limits;
+    interrupted_limits.node_limit = 3450;
+    const proton::SearchResult interrupted_result =
+        interrupted_search->think(interrupted_position, interrupted_limits);
+    expect(interrupted_result.nodes >= interrupted_limits.node_limit,
+           "loss-band verification reaches the cancellation node limit");
+    expect(full_result.score_cp - exact_score_for(interrupted_result.best) <= 700,
+           "an interrupted verification never admits an out-of-band move");
+
+    std::atomic<bool> primary_stop{false};
+    std::atomic<bool> secondary_stop{true};
+    proton::Evaluator dual_stop_evaluator;
+    dual_stop_evaluator.set_options(full_options);
+    proton::Search dual_stop_search(dual_stop_evaluator, full_options);
+    proton::Position dual_stop_position;
+    expect(dual_stop_position.set_fen(loss_band_fen), "dual-stop FEN parses");
+    proton::SearchLimits dual_stop_limits = loss_band_limits;
+    dual_stop_limits.external_stop = &primary_stop;
+    dual_stop_limits.secondary_external_stop = &secondary_stop;
+    const proton::SearchResult dual_stop_result =
+        dual_stop_search.think(dual_stop_position, dual_stop_limits);
+    expect(dual_stop_result.depth == 0 && dual_stop_result.nodes == 0,
+           "either external cancellation source stops a nested search");
+
+    const std::string tight_band_fen =
+        "1rbqk2r/pp2ppbp/2p2np1/3p4/3P4/P1NBP3/1PP2PPP/R2QK1NR b KQk - 2 7";
+    proton::EngineOptions tight_full_options;
+    tight_full_options.use_book = false;
+    tight_full_options.hash_mb = 1;
+    proton::Evaluator tight_full_evaluator;
+    tight_full_evaluator.set_options(tight_full_options);
+    auto tight_full_search = std::make_unique<proton::Search>(tight_full_evaluator);
+    tight_full_search->set_options(tight_full_options);
+    proton::Position tight_full_position;
+    expect(tight_full_position.set_fen(tight_band_fen), "tight loss-band FEN parses");
+    proton::SearchLimits tight_limits;
+    tight_limits.depth = 5;
+    const proton::SearchResult tight_full_result =
+        tight_full_search->think(tight_full_position, tight_limits);
+
+    proton::EngineOptions tight_limited_options = tight_full_options;
+    tight_limited_options.uci_limit_strength = true;
+    tight_limited_options.uci_elo = 2700;
+    tight_limited_options.human_seed = 27;
+    proton::Evaluator tight_limited_evaluator;
+    tight_limited_evaluator.set_options(tight_limited_options);
+    auto tight_limited_search =
+        std::make_unique<proton::Search>(tight_limited_evaluator);
+    tight_limited_search->set_options(tight_limited_options);
+    proton::Position tight_limited_position;
+    expect(tight_limited_position.set_fen(tight_band_fen),
+           "limited tight loss-band FEN parses");
+    const proton::SearchResult tight_limited_result =
+        tight_limited_search->think(tight_limited_position, tight_limits);
+    expect(tight_limited_result.best == tight_full_result.best,
+           "fresh confirmation rejects the unsafe tight-band alternative");
+
+    proton::Evaluator tight_verify_evaluator;
+    tight_verify_evaluator.set_options(tight_full_options);
+    auto tight_verify_search =
+        std::make_unique<proton::Search>(tight_verify_evaluator);
+    tight_verify_search->set_options(tight_full_options);
+    proton::Position tight_verify_position;
+    expect(tight_verify_position.set_fen(tight_band_fen),
+           "tight loss-band verification FEN parses");
+    proton::SearchLimits tight_verify_limits = tight_limits;
+    tight_verify_limits.search_moves_specified = true;
+    tight_verify_limits.search_moves.push_back(tight_limited_result.best);
+    const proton::SearchResult tight_verify_result =
+        tight_verify_search->think(tight_verify_position, tight_verify_limits);
+    expect(tight_full_result.score_cp - tight_verify_result.score_cp <= 22,
+           "Elo 2700 alternative stays inside its 22 cp loss band");
+
+    proton::EngineOptions book_options;
+    book_options.use_book = true;
+    book_options.hash_mb = 1;
+    proton::Evaluator book_evaluator;
+    book_evaluator.set_options(book_options);
+    auto book_search = std::make_unique<proton::Search>(book_evaluator);
+    book_search->set_options(book_options);
+    proton::SearchLimits book_limits;
+    book_limits.depth = 2;
+    book_limits.movetime_ms = 1000;
+    const proton::SearchResult book_result =
+        book_search->think(proton::Position{}, book_limits);
+    expect(book_result.depth == 0 && book_result.nodes == 0,
+           "full-strength timed play may use the opening book");
+    book_options.uci_limit_strength = true;
+    book_options.human_seed = 27;
+    book_evaluator.set_options(book_options);
+    book_search->set_options(book_options);
+    book_search->new_game();
+    const proton::SearchResult limited_book_result =
+        book_search->think(proton::Position{}, book_limits);
+    expect(limited_book_result.depth == 2 && limited_book_result.nodes > 0,
+           "limited play searches instead of bypassing the limiter through the book");
+
     options.human_style = false;
+    options.human_skill = 20;
+    options.human_max_loss_cp = 12;
     options.human_seed = 0;
     evaluator.set_options(options);
     search.set_options(options);
