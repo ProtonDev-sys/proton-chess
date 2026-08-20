@@ -35,11 +35,33 @@ jobs:
       - name: Install match tooling
         run: python -m pip install -r candidate/requirements.txt
 
-      - name: Build candidate
+      - name: Stage conservative threat weights
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("candidate/src/engine/eval.cpp")
+          text = path.read_text()
+          replacements = {
+              "victim_value / 12, 8, 64": "victim_value / 24, 6, 32",
+              "victim_value / 14, 6, 56": "victim_value / 28, 4, 28",
+              "exchange_gap / 18, 6, 42": "exchange_gap / 36, 4, 20",
+              "exchange_gap / 20, 5, 38": "exchange_gap / 40, 3, 18",
+              "penalty.mg = penalty.mg * 2 / 3": "penalty.mg /= 2",
+              "penalty.eg = penalty.eg * 2 / 3": "penalty.eg /= 2",
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one occurrence of {old!r}")
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+
+      - name: Build and test candidate
         run: >-
-          cmake -S candidate -B candidate/build -DCMAKE_BUILD_TYPE=Release
-          -DPROTON_BUILD_TESTS=OFF &&
-          cmake --build candidate/build --config Release --parallel 2
+          cmake -S candidate -B candidate/build -DCMAKE_BUILD_TYPE=Release &&
+          cmake --build candidate/build --config Release --parallel 2 &&
+          ctest --test-dir candidate/build -C Release --output-on-failure
 
       - name: Build baseline
         run: >-
@@ -52,7 +74,7 @@ jobs:
         run: >-
           python tools/compare_search.py build/proton_chess
           ../baseline/build/proton_chess
-          --candidate-label threat-aware
+          --candidate-label threat-aware-conservative
           --baseline-label main
           --openings openings/uho_lichess_4852_v1_200.epd
           --positions 50 --depth 8 --hash 16 --trials 2 --timeout 60
@@ -63,7 +85,7 @@ jobs:
         run: >-
           python tools/compare_engines.py build/proton_chess
           ../baseline/build/proton_chess
-          --candidate-label threat-aware
+          --candidate-label threat-aware-conservative
           --baseline-label main
           --games 80 --move-time 0.01 --watchdog-grace 5
           --max-plies 180 --hash 16 --seed 20260820
@@ -78,26 +100,8 @@ jobs:
           from pathlib import Path
 
           search = json.loads(Path("build/bench/threat-search.json").read_text())
-          summary = search["summary"]
-          search_keys = (
-              "search_pairs", "bestmove_matches", "score_matches", "pv_matches",
-              "candidate_info_nodes", "baseline_info_nodes", "node_delta",
-              "node_delta_percent", "candidate_engine_time_ms",
-              "baseline_engine_time_ms", "engine_time_delta_percent",
-              "deterministic_across_trials",
-          )
-          print("SEARCH_SUMMARY", {
-              key: summary.get(key) for key in search_keys
-          })
+          print("SEARCH_SUMMARY", json.dumps(search["summary"], sort_keys=True))
 
           match = json.loads(Path("build/bench/threat-match.json").read_text())
-          result = match["result"]
-          match_keys = (
-              "games", "wins", "draws", "losses", "score",
-              "estimated_elo_delta", "score_ci95_low", "score_ci95_high",
-              "exact_p_gain", "exact_p_regression", "verdict",
-          )
-          print("MATCH_SUMMARY", {
-              key: result.get(key) for key in match_keys
-          })
+          print("MATCH_RESULT", json.dumps(match["result"], sort_keys=True))
           PY
