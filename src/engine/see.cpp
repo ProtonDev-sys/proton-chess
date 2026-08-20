@@ -199,6 +199,8 @@ int static_exchange_eval(const Position& position, const Move& move) {
     while (depth + 1 < static_cast<int>(gains.size())) {
         const Bitboard attackers = attacks::attackers_to(move.to, occupied, pieces) &
                                    remaining_by_color[side];
+        if (attackers == 0) break;
+
         const LeastValuableAttacker attacker =
             least_valuable_attacker(attackers, occupied, pieces,
                                     remaining_by_color, king_squares, side,
