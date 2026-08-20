@@ -18,6 +18,50 @@ constexpr std::array<int, 6> PhaseValue = {0, 1, 1, 2, 4, 0};
 constexpr std::array<int, 8> PassedMg = {0, 4, 10, 20, 38, 65, 105, 0};
 constexpr std::array<int, 8> PassedEg = {0, 8, 18, 34, 58, 92, 145, 0};
 
+struct TaperedScore {
+    int mg = 0;
+    int eg = 0;
+};
+
+[[nodiscard]] consteval std::array<int, 64> make_centre_distances() {
+    std::array<int, 64> distances{};
+    for (int square = 0; square < 64; ++square) {
+        const int file_twice = 2 * file_of(square) - 7;
+        const int rank_twice = 2 * rank_of(square) - 7;
+        distances[square] = (file_twice < 0 ? -file_twice : file_twice) +
+                            (rank_twice < 0 ? -rank_twice : rank_twice);
+    }
+    return distances;
+}
+
+inline constexpr auto CentreDistances = make_centre_distances();
+
+[[nodiscard]] consteval auto make_piece_square_scores() {
+    std::array<std::array<std::array<TaperedScore, 64>, 6>, 2> scores{};
+    for (Color color : {White, Black}) {
+        for (int square = 0; square < 64; ++square) {
+            const int rr = color == White ? rank_of(square) : 7 - rank_of(square);
+            const int centre = 14 - CentreDistances[square];
+            scores[color][Knight][square] = {
+                centre * 4 - (rr == 0 ? 12 : 0), centre * 3};
+            scores[color][Bishop][square] = {centre * 2, centre * 2};
+            scores[color][Rook][square] = {rr * 2, rr * 3};
+            scores[color][Queen][square] = {centre, centre * 2};
+            scores[color][King][square] = {-centre * 2, centre * 4};
+        }
+    }
+    return scores;
+}
+
+inline constexpr auto PieceSquareScores = make_piece_square_scores();
+constexpr std::array<int, 6> MobilityMg = {0, 4, 4, 2, 1, 0};
+constexpr std::array<int, 6> MobilityEg = {0, 4, 5, 3, 2, 0};
+
+static_assert(CentreDistances[0] == 14);
+static_assert(CentreDistances[27] == 2);
+static_assert(PieceSquareScores[White][Knight][1].mg == -4);
+static_assert(PieceSquareScores[Black][Rook][56].eg == 0);
+
 // Only pawn, knight, bishop and rook attacks can be materially cheaper
 // than a non-king victim. Queen and king attacks can never activate the
 // bounded pressure term, so do not maintain redundant per-type maps for them.
@@ -99,9 +143,7 @@ static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
 }
 
 [[nodiscard]] int centre_distance(int square) {
-    const int file_twice = std::abs(2 * file_of(square) - 7);
-    const int rank_twice = std::abs(2 * rank_of(square) - 7);
-    return file_twice + rank_twice;
+    return CentreDistances[square];
 }
 
 [[nodiscard]] bool is_passed_pawn(Bitboard enemy_pawns, Color color, int square) {
@@ -362,9 +404,6 @@ int CoreEvalNet::evaluate(const Position& position) const {
             while (remaining != 0) {
                 const int square = static_cast<int>(std::countr_zero(remaining));
                 remaining &= remaining - 1;
-                const int rr = relative_rank(color, square);
-                const int centre = 14 - centre_distance(square);
-
                 mg += sign * MgValue[type];
                 eg += sign * EgValue[type];
                 phase += PhaseValue[type];
@@ -373,33 +412,9 @@ int CoreEvalNet::evaluate(const Position& position) const {
                     else black_material += EgValue[type];
                 }
 
-                int mg_square = 0;
-                int eg_square = 0;
-                switch (type) {
-                case Knight:
-                    mg_square += centre * 4 - (rr == 0 ? 12 : 0);
-                    eg_square += centre * 3;
-                    break;
-                case Bishop:
-                    ++bishops[color];
-                    mg_square += centre * 2;
-                    eg_square += centre * 2;
-                    break;
-                case Rook:
-                    mg_square += rr * 2;
-                    eg_square += rr * 3;
-                    break;
-                case Queen:
-                    mg_square += centre;
-                    eg_square += centre * 2;
-                    break;
-                case King:
-                    mg_square -= centre * 2;
-                    eg_square += centre * 4;
-                    break;
-                default:
-                    break;
-                }
+                if (type == Bishop) ++bishops[color];
+                int mg_square = PieceSquareScores[color][type][square].mg;
+                int eg_square = PieceSquareScores[color][type][square].eg;
 
                 const Bitboard piece_map =
                     piece_attacks(type, square, color, occupied);
@@ -413,26 +428,8 @@ int CoreEvalNet::evaluate(const Position& position) const {
                     mobility_map &= ~pawn_attacks[opposite(color)];
                 }
                 const int mobility = std::popcount(mobility_map);
-                switch (type) {
-                case Knight:
-                    mg_square += mobility * 4;
-                    eg_square += mobility * 4;
-                    break;
-                case Bishop:
-                    mg_square += mobility * 4;
-                    eg_square += mobility * 5;
-                    break;
-                case Rook:
-                    mg_square += mobility * 2;
-                    eg_square += mobility * 3;
-                    break;
-                case Queen:
-                    mg_square += mobility;
-                    eg_square += mobility * 2;
-                    break;
-                default:
-                    break;
-                }
+                mg_square += mobility * MobilityMg[type];
+                eg_square += mobility * MobilityEg[type];
 
                 mg += sign * mg_square;
                 eg += sign * eg_square;
