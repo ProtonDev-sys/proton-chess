@@ -1,0 +1,159 @@
+diff --git a/tests/test_compare_engines.py b/tests/test_compare_engines.py
+index 49cb50f..05ca7e9 100644
+--- a/tests/test_compare_engines.py
++++ b/tests/test_compare_engines.py
+@@ -124,6 +124,27 @@ class CompareEnginesTests(unittest.TestCase):
+         with self.assertRaisesRegex(ValueError, "missing HumanSeed"):
+             compare_engines.validate_profiles(both_missing_seed, missing_seed)
+ 
++    def test_parser_accepts_fixed_node_match_control(self) -> None:
++        with mock.patch.object(
++            sys,
++            "argv",
++            [
++                "compare_engines.py",
++                "candidate",
++                "baseline",
++                "--nodes",
++                "4096",
++                "--json",
++                "report.json",
++            ],
++        ):
++            args = compare_engines.parse_args()
++        self.assertEqual(args.nodes, 4096)
++        self.assertIsNone(args.move_time)
++        self.assertIsNone(args.base_seconds)
++        control = estimate_elo.build_time_control(args)
++        self.assertEqual(control.payload()["mode"], "fixed_nodes")
++
+     def test_engine_seed_is_stable_and_domain_separated(self) -> None:
+         base = compare_engines.derive_engine_seed(17, 1, "white")
+         self.assertEqual(base, compare_engines.derive_engine_seed(17, 1, "white"))
+diff --git a/tests/test_estimate_elo.py b/tests/test_estimate_elo.py
+index cbc423b..bb67091 100644
+--- a/tests/test_estimate_elo.py
++++ b/tests/test_estimate_elo.py
+@@ -396,6 +396,31 @@ class EstimateEloTests(unittest.TestCase):
+         self.assertEqual(openings[1].fen, chess.STARTING_FEN)
+         self.assertEqual(openings[1].moves, ["e2e4", "e7e5"])
+ 
++    def test_fixed_nodes_use_go_nodes_and_an_absolute_watchdog(self) -> None:
++        control = estimate_elo.TimeControl(
++            None, None, 0.0, 1.5, nodes_per_move=4096
++        )
++        limit = control.limit(None)
++        self.assertEqual(limit.nodes, 4096)
++        self.assertIsNone(limit.time)
++        self.assertEqual(control.watchdog(chess.WHITE, None), 1.5)
++        self.assertEqual(control.payload()["mode"], "fixed_nodes")
++        self.assertEqual(control.payload()["nodes_per_move"], 4096)
++
++    def test_build_time_control_accepts_fixed_nodes(self) -> None:
++        args = Namespace(
++            nodes=2048,
++            move_time=None,
++            base_seconds=None,
++            increment=0.0,
++            watchdog_grace=2.0,
++        )
++        control = estimate_elo.build_time_control(args)
++        self.assertEqual(control.nodes_per_move, 2048)
++        with self.assertRaisesRegex(ValueError, "nodes must be positive"):
++            args.nodes = 0
++            estimate_elo.build_time_control(args)
++
+     def test_distinct_games_can_use_distinct_lifecycle_tokens(self) -> None:
+         player = ScriptedPlayer(["e2e4", "e2e4"])
+         control = estimate_elo.TimeControl(0.01, None, 0.0, 1.0)
+diff --git a/tools/compare_engines.py b/tools/compare_engines.py
+index ea80fa4..a19cb12 100644
+--- a/tools/compare_engines.py
++++ b/tools/compare_engines.py
+@@ -113,7 +113,7 @@ class AbReport:
+     exact_alpha: float
+     max_plies: int
+     hash_mb: int
+-    time_control: dict[str, float | str | None]
++    time_control: dict[str, float | int | str | None]
+     candidate: LabeledEngineArtifact
+     baseline: LabeledEngineArtifact
+     candidate_options: dict[str, Any]
+@@ -150,6 +150,8 @@ def parse_args() -> argparse.Namespace:
+                         help="fixed seconds per move (default: 0.05)")
+     timing.add_argument("--base-seconds", type=float,
+                         help="Fischer starting clock in seconds")
++    timing.add_argument("--nodes", type=int,
++                        help="fixed Proton nodes per move for deterministic A/B screens")
+     parser.add_argument("--increment", type=float, default=0.0,
+                         help="Fischer increment in seconds")
+     parser.add_argument("--watchdog-grace", type=float, default=2.0,
+diff --git a/tools/estimate_elo.py b/tools/estimate_elo.py
+index 2e73985..2470db8 100644
+--- a/tools/estimate_elo.py
++++ b/tools/estimate_elo.py
+@@ -33,8 +33,11 @@ class TimeControl:
+     base_seconds: float | None
+     increment_seconds: float
+     watchdog_grace_seconds: float
++    nodes_per_move: int | None = None
+ 
+     def limit(self, clocks: dict[chess.Color, float] | None) -> chess.engine.Limit:
++        if self.nodes_per_move is not None:
++            return chess.engine.Limit(nodes=self.nodes_per_move)
+         if self.move_time is not None:
+             return chess.engine.Limit(time=self.move_time)
+         assert clocks is not None
+@@ -46,6 +49,8 @@ class TimeControl:
+         )
+ 
+     def watchdog(self, side: chess.Color, clocks: dict[chess.Color, float] | None) -> float:
++        if self.nodes_per_move is not None:
++            return max(0.001, self.watchdog_grace_seconds)
+         if self.move_time is not None:
+             allowance = self.move_time
+         else:
+@@ -53,9 +58,17 @@ class TimeControl:
+             allowance = clocks[side]
+         return max(0.001, allowance + self.watchdog_grace_seconds)
+ 
+-    def payload(self) -> dict[str, float | str | None]:
++    def payload(self) -> dict[str, float | int | str | None]:
++        mode = (
++            "fixed_nodes"
++            if self.nodes_per_move is not None
++            else "fixed_movetime"
++            if self.move_time is not None
++            else "fischer"
++        )
+         return {
+-            "mode": "fixed_movetime" if self.move_time is not None else "fischer",
++            "mode": mode,
++            "nodes_per_move": self.nodes_per_move,
+             "move_time_seconds": self.move_time,
+             "base_seconds": self.base_seconds,
+             "increment_seconds": self.increment_seconds,
+@@ -775,7 +788,14 @@ def run_level(
+ 
+ 
+ def build_time_control(args: argparse.Namespace) -> TimeControl:
+-    move_time = 0.05 if args.move_time is None and args.base_seconds is None else args.move_time
++    nodes_per_move = getattr(args, "nodes", None)
++    move_time = (
++        0.05
++        if nodes_per_move is None and args.move_time is None and args.base_seconds is None
++        else args.move_time
++    )
++    if nodes_per_move is not None and nodes_per_move <= 0:
++        raise ValueError("nodes must be positive")
+     if move_time is not None and move_time <= 0.0:
+         raise ValueError("move-time must be positive")
+     if args.base_seconds is not None and args.base_seconds <= 0.0:
+@@ -791,6 +811,7 @@ def build_time_control(args: argparse.Namespace) -> TimeControl:
+         base_seconds=args.base_seconds,
+         increment_seconds=args.increment,
+         watchdog_grace_seconds=args.watchdog_grace,
++        nodes_per_move=nodes_per_move,
+     )
+ 
+ 
