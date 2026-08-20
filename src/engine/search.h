@@ -116,6 +116,8 @@ private:
         int see = 0;
     };
 
+    using ContinuationRows = std::array<const std::int16_t*, 2>;
+
     struct RootMove {
         Move move = Move::null();
         int score = NoScore;
@@ -211,10 +213,12 @@ private:
                     int depth, int alpha, int beta);
 
     void score_moves(const Position& position, const std::vector<Move>& moves,
-                              int ply, const Move& tt_move, bool captures_only);
-    [[nodiscard]] int move_order_score(const Position& position, const Move& move,
-                                       int ply, const Move& tt_move,
-                                       bool captures_only, int see) const;
+                     int ply, const Move& tt_move, bool captures_only,
+                     const ContinuationRows& continuation_rows);
+    [[nodiscard]] int move_order_score(
+        const Position& position, const Move& move, int ply,
+        const Move& tt_move, bool captures_only, int see,
+        const ContinuationRows& continuation_rows) const;
     [[nodiscard]] static int captured_value(const Position& position, const Move& move);
     [[nodiscard]] static int promotion_gain(const Move& move);
     void update_quiet_history(const Position& position, Color color, const Move& best,
@@ -223,8 +227,10 @@ private:
                                 const std::vector<Move>& tried_captures);
     static void apply_history_bonus(int& value, int bonus);
     static void apply_continuation_bonus(std::int16_t& value, int bonus);
-    [[nodiscard]] int continuation_score(const Position& position,
-                                         const Move& move, int ply) const;
+    [[nodiscard]] ContinuationRows continuation_rows(int ply) const;
+    [[nodiscard]] static int continuation_score(
+        const Position& position, const Move& move,
+        const ContinuationRows& continuation_rows);
     void update_correction_history(const Position& position, int depth,
                                    int raw_eval, int score, Bound bound);
     [[nodiscard]] int corrected_static_eval(const Position& position,
