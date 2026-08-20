@@ -18,7 +18,15 @@ constexpr std::array<int, 6> PhaseValue = {0, 1, 1, 2, 4, 0};
 constexpr std::array<int, 8> PassedMg = {0, 4, 10, 20, 38, 65, 105, 0};
 constexpr std::array<int, 8> PassedEg = {0, 8, 18, 34, 58, 92, 145, 0};
 
-using AttackByType = std::array<std::array<Bitboard, 6>, 2>;
+// Only pawn, knight, bishop and rook attacks can be materially cheaper
+// than a non-king victim. Queen and king attacks can never activate the
+// bounded pressure term, so do not maintain redundant per-type maps for them.
+constexpr std::size_t ThreatAttackerTypeCount =
+    static_cast<std::size_t>(Rook) + 1;
+using AttackByType =
+    std::array<std::array<Bitboard, ThreatAttackerTypeCount>, 2>;
+
+static_assert(ThreatAttackerTypeCount == 4);
 
 struct ThreatPenalty {
     int mg = 0;
@@ -123,23 +131,23 @@ static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
 }
 
 [[nodiscard]] int least_attacker_value(
-    const std::array<Bitboard, 6>& attacks_by_type, int square) {
+    const std::array<Bitboard, ThreatAttackerTypeCount>& attacks_by_type,
+    int square) {
     const Bitboard target = bit(square);
-    for (PieceType type : {Pawn, Knight, Bishop, Rook, Queen, King}) {
-        if ((attacks_by_type[type] & target) != 0) return piece_value(type);
+    for (PieceType type : {Pawn, Knight, Bishop, Rook}) {
+        if ((attacks_by_type[static_cast<std::size_t>(type)] & target) != 0) {
+            return piece_value(type);
+        }
     }
     return piece_value(King);
 }
 
 [[nodiscard]] ThreatPenalty threat_penalty(PieceType victim,
-                                           int least_attacker,
-                                           bool defended) {
+                                           int least_attacker) {
     // Quiescence already resolves executable captures. Pricing loose pieces
     // here double-counts hanging material and makes shallow search unstable.
     // Static evaluation therefore measures only the positional pressure on a
     // defended piece attacked by a materially cheaper unit.
-    if (!defended) return {};
-
     const int victim_value = piece_value(victim);
     if (least_attacker + piece_value(Pawn) >= victim_value) return {};
 
@@ -157,20 +165,18 @@ void apply_threat_evaluation(const Position& position,
     for (Color color : {White, Black}) {
         const Color enemy = opposite(color);
         const int sign = color == White ? 1 : -1;
-        Bitboard threatened = position.occupancy(color) & attack_maps[enemy];
+        Bitboard threatened = position.occupancy(color) & attack_maps[enemy] &
+                              attack_maps[color];
         threatened &= ~position.pieces(make_piece(color, King));
 
         while (threatened != 0) {
             const int square = static_cast<int>(std::countr_zero(threatened));
             threatened &= threatened - 1;
             const PieceType victim = piece_type(position.piece_at(square));
-            if (victim == NoPieceType || victim == King) continue;
-
-            const bool defended = (attack_maps[color] & bit(square)) != 0;
+            if (victim == NoPieceType || victim == Pawn || victim == King) continue;
             const int attacker =
                 least_attacker_value(attacks_by_type[enemy], square);
-            const ThreatPenalty penalty =
-                threat_penalty(victim, attacker, defended);
+            const ThreatPenalty penalty = threat_penalty(victim, attacker);
             mg -= sign * penalty.mg;
             eg -= sign * penalty.eg;
         }
@@ -341,8 +347,10 @@ int CoreEvalNet::evaluate(const Position& position) const {
     const auto& pawn_attacks = pawn.attacks;
     std::array<Bitboard, 2> attack_maps = pawn_attacks;
     AttackByType attacks_by_type{};
-    attacks_by_type[White][Pawn] = pawn_attacks[White];
-    attacks_by_type[Black][Pawn] = pawn_attacks[Black];
+    attacks_by_type[White][static_cast<std::size_t>(Pawn)] =
+        pawn_attacks[White];
+    attacks_by_type[Black][static_cast<std::size_t>(Pawn)] =
+        pawn_attacks[Black];
     const Bitboard occupied = position.occupancy_all();
 
     for (Color color : {White, Black}) {
@@ -396,7 +404,10 @@ int CoreEvalNet::evaluate(const Position& position) const {
                 const Bitboard piece_map =
                     piece_attacks(type, square, color, occupied);
                 attack_maps[color] |= piece_map;
-                attacks_by_type[color][type] |= piece_map;
+                if (type <= Rook) {
+                    attacks_by_type[color][static_cast<std::size_t>(type)] |=
+                        piece_map;
+                }
                 Bitboard mobility_map = piece_map & ~own;
                 if (type == Knight || type == Bishop) {
                     mobility_map &= ~pawn_attacks[opposite(color)];
