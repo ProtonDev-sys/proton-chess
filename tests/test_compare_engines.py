@@ -90,6 +90,7 @@ class CompareEnginesTests(unittest.TestCase):
         self.assertFalse(configuration["UseBook"])
         self.assertFalse(configuration["HumanStyle"])
         self.assertEqual(configuration["HumanSkill"], 20)
+        self.assertEqual(configuration["HumanVariety"], 35)
         self.assertEqual(configuration["HumanSeed"], "123456789")
         self.assertEqual(configuration["MoveOverhead"], 25)
         self.assertEqual(configuration["Contempt"], 0)

@@ -22,6 +22,7 @@ struct HumanSettings {
     bool enabled = false;
     int skill = 20;
     int max_loss_cp = 12;
+    int variety_percent = 0;
 };
 
 HumanSettings resolved_human_settings(const EngineOptions& options) {
@@ -31,13 +32,27 @@ HumanSettings resolved_human_settings(const EngineOptions& options) {
             true,
             profile.skill,
             profile.max_loss_cp,
+            profile.variety_percent,
         };
     }
     return HumanSettings{
         options.human_style || options.human_skill < 20,
         std::clamp(options.human_skill, 0, 20),
         std::clamp(options.human_max_loss_cp, 0, 500),
+        std::clamp(options.human_variety_percent, 0, 100),
     };
+}
+
+bool human_selection_opportunity(const HumanSettings& human,
+                                 std::mt19937_64& random) {
+    if (!human.enabled || human.variety_percent <= 0) return false;
+    if (human.variety_percent >= 100) return true;
+
+    // The engine's raw generator is specified; distribution implementations are
+    // not. A direct draw keeps seeded opportunity decisions reproducible across
+    // standard libraries. The modulo bias is negligible for a 64-bit source.
+    return random() % 100ULL <
+           static_cast<std::uint64_t>(human.variety_percent);
 }
 
 int human_loss_allowance(const HumanSettings& human) {
@@ -1348,7 +1363,8 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
         return lhs.score > rhs.score;
     });
     const HumanSettings human = resolved_human_settings(options_);
-    if (!human.enabled || root_moves.size() == 1 || completed_depth < 2 ||
+    if (!human.enabled || !selection_opportunity_ || root_moves.size() == 1 ||
+        completed_depth < 2 ||
         std::abs(root_moves.front().score) >= MateThreshold || should_stop(true)) {
         // Never randomise a proven mate (or a forced-mate defence). Root PVS
         // bounds for unsearched alternatives are not reliable enough to safely
@@ -1470,8 +1486,10 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     main_node_limit_ = 0;
     main_budget_exhausted_ = false;
     selection_budget_reserved_ = false;
+    selection_opportunity_ = false;
     const HumanSettings active_human = resolved_human_settings(options_);
-    main_phase_ = active_human.enabled && human_loss_allowance(active_human) > 0;
+    selection_opportunity_ = human_selection_opportunity(active_human, random_);
+    main_phase_ = selection_opportunity_ && human_loss_allowance(active_human) > 0;
     if (main_phase_ && limits_.node_limit != 0) {
         main_node_limit_ = std::max<std::uint64_t>(1, limits_.node_limit / 2);
     }

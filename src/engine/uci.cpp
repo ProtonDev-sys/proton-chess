@@ -230,6 +230,8 @@ void UciLoop::handle_setoption(const std::string& line) {
         options_.human_skill = std::clamp(number, 0, 20);
     } else if (key == "humanmaxlosscp" && parse_int(value, number)) {
         options_.human_max_loss_cp = std::clamp(number, 0, 500);
+    } else if (key == "humanvariety" && parse_int(value, number)) {
+        options_.human_variety_percent = std::clamp(number, 0, 100);
     } else if (key == "moveoverhead" && parse_int(value, number)) {
         options_.move_overhead_ms = std::clamp(number, 0, 5000);
     } else if (key == "contempt" && parse_int(value, number)) {
@@ -330,6 +332,7 @@ void UciLoop::handle_command(const std::string& line, bool& quit) {
         print_line("option name HumanStyle type check default false");
         print_line("option name HumanSkill type spin default 20 min 0 max 20");
         print_line("option name HumanMaxLossCp type spin default 12 min 0 max 500");
+        print_line("option name HumanVariety type spin default 35 min 0 max 100");
         print_line("option name HumanSeed type string default 0");
         print_line("option name MoveOverhead type spin default 25 min 0 max 5000");
         print_line("option name Contempt type spin default 0 min -100 max 100");
