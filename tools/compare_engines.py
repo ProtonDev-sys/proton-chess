@@ -113,7 +113,7 @@ class AbReport:
     exact_alpha: float
     max_plies: int
     hash_mb: int
-    time_control: dict[str, float | str | None]
+    time_control: dict[str, float | int | str | None]
     candidate: LabeledEngineArtifact
     baseline: LabeledEngineArtifact
     candidate_options: dict[str, Any]
@@ -150,6 +150,8 @@ def parse_args() -> argparse.Namespace:
                         help="fixed seconds per move (default: 0.05)")
     timing.add_argument("--base-seconds", type=float,
                         help="Fischer starting clock in seconds")
+    timing.add_argument("--nodes", type=int,
+                        help="fixed Proton nodes per move for deterministic A/B screens")
     parser.add_argument("--increment", type=float, default=0.0,
                         help="Fischer increment in seconds")
     parser.add_argument("--watchdog-grace", type=float, default=2.0,

@@ -396,6 +396,31 @@ class EstimateEloTests(unittest.TestCase):
         self.assertEqual(openings[1].fen, chess.STARTING_FEN)
         self.assertEqual(openings[1].moves, ["e2e4", "e7e5"])
 
+    def test_fixed_nodes_use_go_nodes_and_an_absolute_watchdog(self) -> None:
+        control = estimate_elo.TimeControl(
+            None, None, 0.0, 1.5, nodes_per_move=4096
+        )
+        limit = control.limit(None)
+        self.assertEqual(limit.nodes, 4096)
+        self.assertIsNone(limit.time)
+        self.assertEqual(control.watchdog(chess.WHITE, None), 1.5)
+        self.assertEqual(control.payload()["mode"], "fixed_nodes")
+        self.assertEqual(control.payload()["nodes_per_move"], 4096)
+
+    def test_build_time_control_accepts_fixed_nodes(self) -> None:
+        args = Namespace(
+            nodes=2048,
+            move_time=None,
+            base_seconds=None,
+            increment=0.0,
+            watchdog_grace=2.0,
+        )
+        control = estimate_elo.build_time_control(args)
+        self.assertEqual(control.nodes_per_move, 2048)
+        with self.assertRaisesRegex(ValueError, "nodes must be positive"):
+            args.nodes = 0
+            estimate_elo.build_time_control(args)
+
     def test_distinct_games_can_use_distinct_lifecycle_tokens(self) -> None:
         player = ScriptedPlayer(["e2e4", "e2e4"])
         control = estimate_elo.TimeControl(0.01, None, 0.0, 1.0)

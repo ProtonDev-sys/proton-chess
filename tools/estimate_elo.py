@@ -33,8 +33,11 @@ class TimeControl:
     base_seconds: float | None
     increment_seconds: float
     watchdog_grace_seconds: float
+    nodes_per_move: int | None = None
 
     def limit(self, clocks: dict[chess.Color, float] | None) -> chess.engine.Limit:
+        if self.nodes_per_move is not None:
+            return chess.engine.Limit(nodes=self.nodes_per_move)
         if self.move_time is not None:
             return chess.engine.Limit(time=self.move_time)
         assert clocks is not None
@@ -46,6 +49,8 @@ class TimeControl:
         )
 
     def watchdog(self, side: chess.Color, clocks: dict[chess.Color, float] | None) -> float:
+        if self.nodes_per_move is not None:
+            return max(0.001, self.watchdog_grace_seconds)
         if self.move_time is not None:
             allowance = self.move_time
         else:
@@ -53,9 +58,17 @@ class TimeControl:
             allowance = clocks[side]
         return max(0.001, allowance + self.watchdog_grace_seconds)
 
-    def payload(self) -> dict[str, float | str | None]:
+    def payload(self) -> dict[str, float | int | str | None]:
+        mode = (
+            "fixed_nodes"
+            if self.nodes_per_move is not None
+            else "fixed_movetime"
+            if self.move_time is not None
+            else "fischer"
+        )
         return {
-            "mode": "fixed_movetime" if self.move_time is not None else "fischer",
+            "mode": mode,
+            "nodes_per_move": self.nodes_per_move,
             "move_time_seconds": self.move_time,
             "base_seconds": self.base_seconds,
             "increment_seconds": self.increment_seconds,
@@ -775,7 +788,14 @@ def run_level(
 
 
 def build_time_control(args: argparse.Namespace) -> TimeControl:
-    move_time = 0.05 if args.move_time is None and args.base_seconds is None else args.move_time
+    nodes_per_move = getattr(args, "nodes", None)
+    move_time = (
+        0.05
+        if nodes_per_move is None and args.move_time is None and args.base_seconds is None
+        else args.move_time
+    )
+    if nodes_per_move is not None and nodes_per_move <= 0:
+        raise ValueError("nodes must be positive")
     if move_time is not None and move_time <= 0.0:
         raise ValueError("move-time must be positive")
     if args.base_seconds is not None and args.base_seconds <= 0.0:
@@ -791,6 +811,7 @@ def build_time_control(args: argparse.Namespace) -> TimeControl:
         base_seconds=args.base_seconds,
         increment_seconds=args.increment,
         watchdog_grace_seconds=args.watchdog_grace,
+        nodes_per_move=nodes_per_move,
     )
 
 
