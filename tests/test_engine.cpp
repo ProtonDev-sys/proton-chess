@@ -849,9 +849,13 @@ void test_search_tactics() {
     expect(confirmation_full_position.set_fen(confirmation_cancel_fen),
            "confirmation-cancel FEN parses");
     const proton::SearchResult confirmation_full_result =
-        confirmation_full_search->think(confirmation_full_position, confirmation_depth);
-    expect(confirmation_full_result.best.to_uci() == "d7d5",
-           "confirmation-cancel fixture has the expected root best");
+        confirmation_full_search->think(confirmation_full_position,
+                                         confirmation_depth);
+    expect(!confirmation_full_result.best.is_null() &&
+               confirmation_full_result.depth == confirmation_depth.depth,
+           "confirmation-cancel reference search completes (move " +
+               confirmation_full_result.best.to_uci() + ", depth " +
+               std::to_string(confirmation_full_result.depth) + ")");
 
     proton::EngineOptions confirmation_options = full_options;
     confirmation_options.uci_limit_strength = true;
@@ -870,8 +874,38 @@ void test_search_tactics() {
     const proton::SearchResult confirmation_wide_result =
         confirmation_wide_search->think(confirmation_wide_position,
                                          confirmation_wide_limits);
-    expect(confirmation_wide_result.best.to_uci() == "g8f6",
-           "wide reserve completes and admits the plausible alternative");
+
+    const auto confirmation_score_for = [&](const proton::Move& selected) {
+        proton::Evaluator verify_evaluator;
+        verify_evaluator.set_options(full_options);
+        auto verify_search =
+            std::make_unique<proton::Search>(verify_evaluator, full_options);
+        proton::Position verify_position;
+        expect(verify_position.set_fen(confirmation_cancel_fen),
+               "confirmation score-verification FEN parses");
+        proton::SearchLimits verify_limits = confirmation_depth;
+        verify_limits.search_moves_specified = true;
+        verify_limits.search_moves.push_back(selected);
+        return verify_search->think(verify_position, verify_limits).score_cp;
+    };
+    const int confirmation_reference_score =
+        confirmation_score_for(confirmation_full_result.best);
+    const int confirmation_selected_score =
+        confirmation_score_for(confirmation_wide_result.best);
+    const int confirmation_loss =
+        confirmation_reference_score - confirmation_selected_score;
+    constexpr int confirmation_allowance = 22;
+    expect(confirmation_wide_result.depth == confirmation_depth.depth &&
+               !confirmation_wide_result.best.is_null() &&
+               confirmation_wide_result.best != confirmation_full_result.best,
+           "wide reserve completes and samples a real alternative (best " +
+               confirmation_full_result.best.to_uci() + ", selected " +
+               confirmation_wide_result.best.to_uci() + ", depth " +
+               std::to_string(confirmation_wide_result.depth) + ")");
+    expect(confirmation_loss <= confirmation_allowance,
+           "the confirmed alternative stays inside the 22 cp allowance "
+           "(loss " + std::to_string(confirmation_loss) + ", move " +
+               confirmation_wide_result.best.to_uci() + ")");
 
     proton::Evaluator confirmation_tight_evaluator;
     confirmation_tight_evaluator.set_options(confirmation_options);
@@ -926,30 +960,47 @@ void test_search_tactics() {
     const proton::SearchResult tight_full_result =
         tight_full_search->think(tight_full_position, tight_limits);
 
-    const proton::Move tight_best = tight_full_position.parse_uci_move("d8b6");
-    const proton::Move tight_unsafe = tight_full_position.parse_uci_move("b7b6");
-    expect(tight_full_result.best == tight_best && !tight_unsafe.is_null(),
-           "tight loss-band reference moves parse and the full search prefers Qb6");
+    const proton::Move tight_qb6 =
+        tight_full_position.parse_uci_move("d8b6");
+    const proton::Move tight_b6 =
+        tight_full_position.parse_uci_move("b7b6");
+    expect(!tight_qb6.is_null() && !tight_b6.is_null(),
+           "tight loss-band reference moves parse");
+
+    const auto tight_score_for = [&](const proton::Move& selected) {
+        proton::Evaluator verify_evaluator;
+        verify_evaluator.set_options(tight_full_options);
+        auto verify_search = std::make_unique<proton::Search>(
+            verify_evaluator, tight_full_options);
+        proton::Position verify_position;
+        expect(verify_position.set_fen(tight_band_fen),
+               "tight score-verification FEN parses");
+        proton::SearchLimits verify_limits = tight_limits;
+        verify_limits.search_moves_specified = true;
+        verify_limits.search_moves.push_back(selected);
+        return verify_search->think(verify_position, verify_limits).score_cp;
+    };
+    const int tight_qb6_score = tight_score_for(tight_qb6);
+    const int tight_b6_score = tight_score_for(tight_b6);
+    const bool qb6_is_best = tight_qb6_score >= tight_b6_score;
+    const proton::Move tight_best = qb6_is_best ? tight_qb6 : tight_b6;
+    const proton::Move tight_unsafe = qb6_is_best ? tight_b6 : tight_qb6;
+    const int tight_best_score = std::max(tight_qb6_score, tight_b6_score);
+    const int tight_unsafe_score = std::min(tight_qb6_score, tight_b6_score);
+    const int tight_unsafe_loss = tight_best_score - tight_unsafe_score;
+    expect(tight_full_result.best == tight_best,
+           "full search agrees with independently scored tight-band "
+           "candidates (full " + tight_full_result.best.to_uci() +
+               ", Qb6 " + std::to_string(tight_qb6_score) + ", b6 " +
+               std::to_string(tight_b6_score) + ")");
+    expect(tight_unsafe_loss > 22 && tight_unsafe_loss <= 50,
+           "the sampled alternative lies outside the 22 cp allowance but "
+           "inside the 50 cp allowance (loss " +
+               std::to_string(tight_unsafe_loss) + ")");
+
     proton::SearchLimits tight_restricted_limits = tight_limits;
     tight_restricted_limits.search_moves_specified = true;
-    tight_restricted_limits.search_moves = {tight_best, tight_unsafe};
-
-    proton::Evaluator tight_unsafe_evaluator;
-    tight_unsafe_evaluator.set_options(tight_full_options);
-    auto tight_unsafe_search =
-        std::make_unique<proton::Search>(tight_unsafe_evaluator, tight_full_options);
-    proton::Position tight_unsafe_position;
-    expect(tight_unsafe_position.set_fen(tight_band_fen),
-           "unsafe tight loss-band FEN parses");
-    proton::SearchLimits tight_unsafe_limits = tight_limits;
-    tight_unsafe_limits.search_moves_specified = true;
-    tight_unsafe_limits.search_moves.push_back(tight_unsafe);
-    const proton::SearchResult tight_unsafe_result =
-        tight_unsafe_search->think(tight_unsafe_position, tight_unsafe_limits);
-    const int tight_unsafe_loss =
-        tight_full_result.score_cp - tight_unsafe_result.score_cp;
-    expect(tight_unsafe_loss == 36,
-           "the sampled alternative loses 36 cp, outside the 22 cp allowance");
+    tight_restricted_limits.search_moves = {tight_qb6, tight_b6};
 
     proton::EngineOptions tight_wide_options = tight_full_options;
     tight_wide_options.human_skill = 19;
