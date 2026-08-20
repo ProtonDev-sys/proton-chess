@@ -36,77 +36,76 @@ int side_score(proton::Evaluator& evaluator, const std::string& fen,
     return evaluator.evaluate(position);
 }
 
-void test_executable_threat_is_stronger() {
+void test_defended_piece_pressure() {
+    proton::Evaluator evaluator;
+
+    const int loose_attacked = white_score(
+        evaluator, "8/8/7k/2p5/3Q4/8/8/K7 w - - 0 1",
+        "loose attacked queen");
+    const int loose_safe = white_score(
+        evaluator, "8/8/7k/5p2/3Q4/8/8/K7 w - - 0 1",
+        "loose safe queen");
+    const int defended_attacked = white_score(
+        evaluator, "8/8/7k/2p5/3Q4/5N2/8/K7 w - - 0 1",
+        "defended attacked queen");
+    const int defended_safe = white_score(
+        evaluator, "8/8/7k/5p2/3Q4/5N2/8/K7 w - - 0 1",
+        "defended safe queen");
+
+    const int loose_gap = loose_safe - loose_attacked;
+    const int defended_gap = defended_safe - defended_attacked;
+    expect(defended_gap >= loose_gap + 8,
+           "a defended queen attacked by a pawn carries a bounded pressure "
+           "penalty beyond the matching loose-piece control (defended=" +
+               std::to_string(defended_gap) + ", loose=" +
+               std::to_string(loose_gap) + ")");
+}
+
+void test_pressure_is_side_to_move_independent() {
     proton::Evaluator evaluator;
 
     const int attacked_white = white_score(
-        evaluator, "8/8/7k/2p5/3Q4/8/8/K7 w - - 0 1",
+        evaluator, "8/8/7k/2p5/3Q4/5N2/8/K7 w - - 0 1",
         "attacked queen with White to move");
-    const int attacked_black = white_score(
-        evaluator, "8/8/7k/2p5/3Q4/8/8/K7 b - - 0 1",
-        "attacked queen with Black to move");
     const int safe_white = white_score(
-        evaluator, "8/8/7k/5p2/3Q4/8/8/K7 w - - 0 1",
+        evaluator, "8/8/7k/5p2/3Q4/5N2/8/K7 w - - 0 1",
         "safe queen with White to move");
+    const int attacked_black = white_score(
+        evaluator, "8/8/7k/2p5/3Q4/5N2/8/K7 b - - 0 1",
+        "attacked queen with Black to move");
     const int safe_black = white_score(
-        evaluator, "8/8/7k/5p2/3Q4/8/8/K7 b - - 0 1",
+        evaluator, "8/8/7k/5p2/3Q4/5N2/8/K7 b - - 0 1",
         "safe queen with Black to move");
 
-    const int attacked_gap = attacked_white - attacked_black;
-    const int safe_gap = safe_white - safe_black;
-    expect(attacked_gap >= safe_gap + 24,
-           "a pawn attack that can be executed immediately has a larger "
-           "side-to-move swing than the safe control (attacked=" +
-               std::to_string(attacked_gap) + ", safe=" +
-               std::to_string(safe_gap) + ")");
+    const int white_gap = safe_white - attacked_white;
+    const int black_gap = safe_black - attacked_black;
+    expect(std::abs(white_gap - black_gap) <= 1,
+           "static pressure is independent of whose turn it is (white=" +
+               std::to_string(white_gap) + ", black=" +
+               std::to_string(black_gap) + ")");
 }
 
-void test_defence_reduces_threat_penalty() {
-    proton::Evaluator evaluator;
-
-    const int loose_white = white_score(
-        evaluator, "8/8/7k/2p5/3Q4/8/8/K7 w - - 0 1",
-        "loose queen with White to move");
-    const int loose_black = white_score(
-        evaluator, "8/8/7k/2p5/3Q4/8/8/K7 b - - 0 1",
-        "loose queen with Black to move");
-    const int defended_white = white_score(
-        evaluator, "8/8/7k/2p5/3Q4/5N2/8/K7 w - - 0 1",
-        "defended queen with White to move");
-    const int defended_black = white_score(
-        evaluator, "8/8/7k/2p5/3Q4/5N2/8/K7 b - - 0 1",
-        "defended queen with Black to move");
-
-    const int loose_gap = loose_white - loose_black;
-    const int defended_gap = defended_white - defended_black;
-    expect(loose_gap >= defended_gap + 12,
-           "an undefended queen has a larger executable-threat penalty than "
-           "the same queen defended by a knight (loose=" +
-               std::to_string(loose_gap) + ", defended=" +
-               std::to_string(defended_gap) + ")");
-}
-
-void test_threat_term_is_colour_symmetric() {
+void test_pressure_is_colour_symmetric() {
     proton::Evaluator evaluator;
     const int white = side_score(
-        evaluator, "8/8/7k/2p5/3Q4/8/8/K7 w - - 0 1",
-        "white threatened queen");
+        evaluator, "8/8/7k/2p5/3Q4/5N2/8/K7 w - - 0 1",
+        "white defended threatened queen");
     const int black = side_score(
-        evaluator, "7k/8/8/4q3/5P2/K7/8/8 b - - 0 1",
-        "mirrored black threatened queen");
+        evaluator, "7k/8/2n5/4q3/5P2/K7/8/8 b - - 0 1",
+        "mirrored black defended threatened queen");
 
     expect(std::abs(white - black) <= 1,
-           "threat evaluation is invariant under colour swap and 180-degree "
-           "rotation (white=" + std::to_string(white) + ", black=" +
-               std::to_string(black) + ")");
+           "pressure evaluation is invariant under colour swap and "
+           "180-degree rotation (white=" + std::to_string(white) +
+               ", black=" + std::to_string(black) + ")");
 }
 
 }  // namespace
 
 int main() {
-    test_executable_threat_is_stronger();
-    test_defence_reduces_threat_penalty();
-    test_threat_term_is_colour_symmetric();
+    test_defended_piece_pressure();
+    test_pressure_is_side_to_move_independent();
+    test_pressure_is_colour_symmetric();
 
     if (failures != 0) {
         std::cerr << failures << " threat-evaluation test(s) failed\n";

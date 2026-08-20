@@ -133,35 +133,21 @@ static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
 
 [[nodiscard]] ThreatPenalty threat_penalty(PieceType victim,
                                            int least_attacker,
-                                           bool defended,
-                                           bool attacker_to_move) {
+                                           bool defended) {
+    // Quiescence already resolves executable captures. Pricing loose pieces
+    // here double-counts hanging material and makes shallow search unstable.
+    // Static evaluation therefore measures only the positional pressure on a
+    // defended piece attacked by a materially cheaper unit.
+    if (!defended) return {};
+
     const int victim_value = piece_value(victim);
-    ThreatPenalty penalty;
+    if (least_attacker + piece_value(Pawn) >= victim_value) return {};
 
-    // A loose piece is tactically fragile even when the current search horizon
-    // does not yet contain the capture. Keep the term deliberately below the
-    // material value so search, not evaluation, remains authoritative.
-    if (!defended) {
-        penalty.mg += std::clamp(victim_value / 12, 8, 64);
-        penalty.eg += std::clamp(victim_value / 14, 6, 56);
-    }
-
-    // A defended piece still loses freedom when a cheaper unit attacks it: the
-    // opponent can often gain a tempo or force an unfavourable exchange.
-    if (least_attacker + 50 < victim_value) {
-        const int exchange_gap = victim_value - least_attacker;
-        penalty.mg += std::clamp(exchange_gap / 18, 6, 42);
-        penalty.eg += std::clamp(exchange_gap / 20, 5, 38);
-    }
-
-    // The threatened side can often answer immediately. Retain most of the
-    // signal for move ordering while distinguishing an executable threat from
-    // one that still has to survive the opponent's turn.
-    if (!attacker_to_move) {
-        penalty.mg = penalty.mg * 2 / 3;
-        penalty.eg = penalty.eg * 2 / 3;
-    }
-    return penalty;
+    const int exchange_gap = victim_value - least_attacker;
+    return {
+        std::clamp(exchange_gap / 40, 4, 20),
+        std::clamp(exchange_gap / 52, 3, 16),
+    };
 }
 
 void apply_threat_evaluation(const Position& position,
@@ -183,8 +169,8 @@ void apply_threat_evaluation(const Position& position,
             const bool defended = (attack_maps[color] & bit(square)) != 0;
             const int attacker =
                 least_attacker_value(attacks_by_type[enemy], square);
-            const ThreatPenalty penalty = threat_penalty(
-                victim, attacker, defended, position.side_to_move() == enemy);
+            const ThreatPenalty penalty =
+                threat_penalty(victim, attacker, defended);
             mg -= sign * penalty.mg;
             eg -= sign * penalty.eg;
         }
