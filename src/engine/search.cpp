@@ -1204,6 +1204,8 @@ int Search::search_root(Position& position, std::vector<RootMove>& root_moves,
 }
 
 void Search::add_book_line(const std::vector<std::string>& moves, int weight) {
+    if (weight <= 0) return;
+
     Position position;
     for (const std::string& text : moves) {
         const Move move = position.parse_uci_move(text);
@@ -1212,8 +1214,14 @@ void Search::add_book_line(const std::vector<std::string>& moves, int weight) {
         auto found = std::find_if(entries.begin(), entries.end(), [&](const BookMove& entry) {
             return entry.move == move;
         });
-        if (found == entries.end()) entries.push_back(BookMove{move, weight});
-        else found->weight += weight;
+        if (found == entries.end()) {
+            entries.push_back(BookMove{move, weight});
+        } else {
+            const std::int64_t combined =
+                static_cast<std::int64_t>(found->weight) + weight;
+            found->weight = static_cast<int>(std::min<std::int64_t>(
+                combined, std::numeric_limits<int>::max()));
+        }
 
         UndoState undo;
         if (!position.make_move(move, undo)) return;
@@ -1286,15 +1294,36 @@ Move Search::select_book_move(const Position& position) {
             [](const BookMove& lhs, const BookMove& rhs) { return lhs.weight < rhs.weight; })->move;
     }
 
-    const double randomness = std::clamp(options_.book_randomness, 0, 100) / 100.0;
-    const double exponent = 1.0 + (1.0 - randomness) * 3.0;
-    std::vector<double> weights;
-    weights.reserve(legal_entries.size());
+    const int randomness = std::clamp(options_.book_randomness, 1, 100);
+    const double exponent = static_cast<double>(400 - 3 * randomness) / 100.0;
+    const auto sampling_weight = [exponent](const BookMove& entry) {
+        return std::pow(static_cast<double>(std::max(1, entry.weight)), exponent);
+    };
+
+    double total_weight = 0.0;
     for (const BookMove& entry : legal_entries) {
-        weights.push_back(std::pow(static_cast<double>(std::max(1, entry.weight)), exponent));
+        total_weight += sampling_weight(entry);
     }
-    std::discrete_distribution<std::size_t> distribution(weights.begin(), weights.end());
-    return legal_entries[distribution(random_)].move;
+    if (!std::isfinite(total_weight) || total_weight <= 0.0) {
+        return std::max_element(legal_entries.begin(), legal_entries.end(),
+            [](const BookMove& lhs, const BookMove& rhs) {
+                return lhs.weight < rhs.weight;
+            })->move;
+    }
+
+    // Use the top 53 generator bits to build an exactly specified [0, 1)
+    // double. This avoids implementation-defined distribution behavior and the
+    // GCC 14 false-positive emitted by std::discrete_distribution's temporary
+    // allocation while retaining the same weighted-book semantics.
+    constexpr double InverseTwoTo53 = 1.0 / 9007199254740992.0;
+    double target = static_cast<double>(random_() >> 11U) *
+                    InverseTwoTo53 * total_weight;
+    for (const BookMove& entry : legal_entries) {
+        const double weight = sampling_weight(entry);
+        if (target < weight) return entry.move;
+        target -= weight;
+    }
+    return legal_entries.back().move;
 }
 
 std::optional<SearchResult> Search::confirm_human_candidate(
