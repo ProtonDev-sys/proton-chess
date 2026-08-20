@@ -1,0 +1,103 @@
+name: Candidate benchmark
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+          persist-credentials: false
+
+      - name: Check out pull-request base
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: baseline
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: candidate/requirements.txt
+
+      - name: Install match tooling
+        run: python -m pip install -r candidate/requirements.txt
+
+      - name: Build candidate
+        run: >-
+          cmake -S candidate -B candidate/build -DCMAKE_BUILD_TYPE=Release
+          -DPROTON_BUILD_TESTS=OFF &&
+          cmake --build candidate/build --config Release --parallel 2
+
+      - name: Build baseline
+        run: >-
+          cmake -S baseline -B baseline/build -DCMAKE_BUILD_TYPE=Release
+          -DPROTON_BUILD_TESTS=OFF &&
+          cmake --build baseline/build --config Release --parallel 2
+
+      - name: Deterministic fixed-depth screen
+        working-directory: candidate
+        run: >-
+          python tools/compare_search.py build/proton_chess
+          ../baseline/build/proton_chess
+          --candidate-label threat-aware
+          --baseline-label main
+          --openings openings/uho_lichess_4852_v1_200.epd
+          --positions 50 --depth 8 --hash 16 --trials 2 --timeout 60
+          --json build/bench/threat-search.json
+
+      - name: Symmetric paired match screen
+        working-directory: candidate
+        run: >-
+          python tools/compare_engines.py build/proton_chess
+          ../baseline/build/proton_chess
+          --candidate-label threat-aware
+          --baseline-label main
+          --games 80 --move-time 0.01 --watchdog-grace 5
+          --max-plies 180 --hash 16 --seed 20260820
+          --openings openings/uho_lichess_4852_v1_200.epd
+          --json build/bench/threat-match.json
+
+      - name: Print benchmark summaries
+        working-directory: candidate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          search = json.loads(Path("build/bench/threat-search.json").read_text())
+          summary = search["summary"]
+          search_keys = (
+              "search_pairs", "bestmove_matches", "score_matches", "pv_matches",
+              "candidate_info_nodes", "baseline_info_nodes", "node_delta",
+              "node_delta_percent", "candidate_engine_time_ms",
+              "baseline_engine_time_ms", "engine_time_delta_percent",
+              "deterministic_across_trials",
+          )
+          print("SEARCH_SUMMARY", {
+              key: summary.get(key) for key in search_keys
+          })
+
+          match = json.loads(Path("build/bench/threat-match.json").read_text())
+          result = match["result"]
+          match_keys = (
+              "games", "wins", "draws", "losses", "score",
+              "estimated_elo_delta", "score_ci95_low", "score_ci95_high",
+              "exact_p_gain", "exact_p_regression", "verdict",
+          )
+          print("MATCH_SUMMARY", {
+              key: result.get(key) for key in match_keys
+          })
+          PY
