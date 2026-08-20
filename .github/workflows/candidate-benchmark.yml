@@ -3,14 +3,6 @@ name: Candidate benchmark
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "src/engine/**"
-      - "tests/**"
-      - "CMakeLists.txt"
-      - ".github/workflows/candidate-benchmark.yml"
-      - "tools/compare_engines.py"
-      - "tools/compare_search.py"
-      - "openings/uho_lichess_4852_v1_200.epd"
 
 permissions:
   contents: read
