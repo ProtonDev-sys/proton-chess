@@ -91,6 +91,28 @@ struct SearchTestAccess {
     }
 
     static std::uint64_t nodes(const Search& search) { return search.nodes_; }
+
+    static Move select_book_move(Search& search, const Position& position) {
+        return search.select_book_move(position);
+    }
+
+    static void add_book_line(Search& search,
+                              const std::vector<std::string>& moves,
+                              int weight) {
+        search.add_book_line(moves, weight);
+    }
+
+    static int book_weight(const Search& search, std::uint64_t key,
+                           const Move& move) {
+        const auto found = search.book_.find(key);
+        if (found == search.book_.end()) return 0;
+        const auto entry = std::find_if(
+            found->second.begin(), found->second.end(),
+            [&](const Search::BookMove& candidate) {
+                return candidate.move == move;
+            });
+        return entry == found->second.end() ? 0 : entry->weight;
+    }
 };
 
 }  // namespace proton
@@ -542,6 +564,55 @@ void test_static_exchange() {
                                         malformed_promotion) ==
                -proton::piece_value(proton::King),
            "SEE rejects an out-of-range promotion type before indexing piece maps");
+}
+
+void test_book_selection() {
+    proton::EngineOptions deterministic_options;
+    deterministic_options.use_book = true;
+    deterministic_options.book_file.clear();
+    deterministic_options.book_randomness = 0;
+    deterministic_options.human_seed = 0x123456789abcdef0ULL;
+    proton::Evaluator deterministic_evaluator;
+    deterministic_evaluator.set_options(deterministic_options);
+    proton::Search deterministic_search(deterministic_evaluator,
+                                        deterministic_options);
+    proton::Position start;
+    expect(proton::SearchTestAccess::select_book_move(deterministic_search,
+                                                       start).to_uci() == "e2e4",
+           "zero-randomness book selection keeps the highest-weight move");
+
+    proton::EngineOptions weighted_options = deterministic_options;
+    weighted_options.book_randomness = 100;
+    proton::Evaluator weighted_evaluator;
+    weighted_evaluator.set_options(weighted_options);
+    proton::Search weighted_search(weighted_evaluator, weighted_options);
+    const std::vector<std::string> expected = {
+        "e2e4", "d2d4", "e2e4", "g1f3", "e2e4", "d2d4", "e2e4", "e2e4",
+        "d2d4", "e2e4", "e2e4", "e2e4", "d2d4", "d2d4", "e2e4", "g1f3",
+    };
+    std::vector<std::string> actual;
+    actual.reserve(expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        actual.push_back(
+            proton::SearchTestAccess::select_book_move(weighted_search, start)
+                .to_uci());
+    }
+    expect(actual == expected,
+           "seeded full-randomness book sampling has a portable sequence");
+
+    proton::EngineOptions overflow_options;
+    overflow_options.use_book = false;
+    proton::Evaluator overflow_evaluator;
+    overflow_evaluator.set_options(overflow_options);
+    proton::Search overflow_search(overflow_evaluator, overflow_options);
+    proton::SearchTestAccess::add_book_line(
+        overflow_search, {"e2e4"}, std::numeric_limits<int>::max());
+    proton::SearchTestAccess::add_book_line(overflow_search, {"e2e4"}, 1);
+    const proton::Move e4 = start.parse_uci_move("e2e4");
+    expect(proton::SearchTestAccess::book_weight(
+               overflow_search, start.key(), e4) ==
+               std::numeric_limits<int>::max(),
+           "duplicate book weights saturate instead of overflowing");
 }
 
 void test_search_tactics() {
@@ -1411,6 +1482,7 @@ int main() {
     test_rook_behind_passed_pawn();
     test_attack_tables();
     test_static_exchange();
+    test_book_selection();
     test_search_tactics();
     test_tt_same_key_replacement();
     test_confirmation_node_cap();
