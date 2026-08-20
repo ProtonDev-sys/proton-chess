@@ -70,6 +70,10 @@ if(PROTON_BUILD_TESTS)
     target_link_libraries(proton-human-policy-tests PRIVATE proton_engine)
     add_test(NAME proton-human-policy-tests COMMAND proton-human-policy-tests)
 
+    add_executable(proton-threat-eval-tests tests/test_threat_eval.cpp)
+    target_link_libraries(proton-threat-eval-tests PRIVATE proton_engine)
+    add_test(NAME proton-threat-eval-tests COMMAND proton-threat-eval-tests)
+
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME proton-uci-smoke
