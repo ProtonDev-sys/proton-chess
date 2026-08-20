@@ -83,3 +83,11 @@ jobs:
           match = json.loads(Path("build/bench/threat-match.json").read_text())
           print("MATCH_RESULT", json.dumps(match["result"], sort_keys=True))
           PY
+
+      - name: Upload benchmark reports
+        uses: actions/upload-artifact@v6
+        with:
+          name: bounded-pressure-benchmark
+          path: candidate/build/bench/*.json
+          if-no-files-found: error
+          retention-days: 14
