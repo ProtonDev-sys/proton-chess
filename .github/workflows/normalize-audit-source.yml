@@ -1,0 +1,64 @@
+name: Normalize audit source
+
+on:
+  push:
+    branches: [agent/current-main-audit]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: ${{ !contains(github.event.head_commit.message, '[normalize-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Normalize exact changed lines
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/engine/eval.cpp")
+          lines = path.read_text().splitlines()
+
+          attack_fixed = False
+          for index, line in enumerate(lines):
+              if (line.strip() == "if (type <= Rook) {" and
+                      index > 0 and
+                      lines[index - 1].strip() == "attack_maps[color] |= piece_map;"):
+                  if index + 3 >= len(lines):
+                      raise SystemExit("truncated attack-map block")
+                  lines[index] = "                if (type <= Rook) {"
+                  lines[index + 1] = (
+                      "                    attacks_by_type[color]"
+                      "[static_cast<std::size_t>(type)] |=")
+                  lines[index + 2] = "                        piece_map;"
+                  lines[index + 3] = "                }"
+                  attack_fixed = True
+                  break
+          if not attack_fixed:
+              raise SystemExit("attack-map block not found")
+
+          call_fixed = False
+          for index, line in enumerate(lines):
+              marker = "continue;            const int attacker ="
+              if marker in line:
+                  prefix = line.split("continue;", 1)[0]
+                  lines[index:index + 1] = [
+                      prefix + "continue;",
+                      "            const int attacker =",
+                  ]
+                  call_fixed = True
+                  break
+          if not call_fixed:
+              raise SystemExit("threat call-site join not found")
+
+          path.write_text("\n".join(lines) + "\n")
+          PY
+      - name: Commit normalization
+        run: |
+          git config user.name "Proton audit automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add src/engine/eval.cpp
+          git commit -m "Normalize exact evaluator fast path [normalize-applied]"
+          git push
