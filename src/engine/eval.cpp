@@ -173,7 +173,8 @@ void apply_threat_evaluation(const Position& position,
             const int square = static_cast<int>(std::countr_zero(threatened));
             threatened &= threatened - 1;
             const PieceType victim = piece_type(position.piece_at(square));
-            if (victim == NoPieceType || victim == Pawn || victim == King) continue;            const int attacker =
+            if (victim == NoPieceType || victim == Pawn || victim == King) continue;
+            const int attacker =
                 least_attacker_value(attacks_by_type[enemy], square);
             const ThreatPenalty penalty = threat_penalty(victim, attacker);
             mg -= sign * penalty.mg;
@@ -404,9 +405,9 @@ int CoreEvalNet::evaluate(const Position& position) const {
                     piece_attacks(type, square, color, occupied);
                 attack_maps[color] |= piece_map;
                 if (type <= Rook) {
-            attacks_by_type[color][static_cast<std::size_t>(type)] |=
-                piece_map;
-        }
+                    attacks_by_type[color][static_cast<std::size_t>(type)] |=
+                        piece_map;
+                }
                 Bitboard mobility_map = piece_map & ~own;
                 if (type == Knight || type == Bishop) {
                     mobility_map &= ~pawn_attacks[opposite(color)];
