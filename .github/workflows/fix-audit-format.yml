@@ -1,0 +1,42 @@
+name: Fix audit formatting
+
+on:
+  push:
+    branches: [agent/current-main-audit]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: ${{ !contains(github.event.head_commit.message, '[format-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Normalize changed block
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/engine/eval.cpp")
+          text = path.read_text()
+          old = """                if (type <= Rook) {
+              attacks_by_type[color][static_cast<std::size_t>(type)] |=
+                  piece_map;
+          }
+          """
+          new = """                if (type <= Rook) {
+                      attacks_by_type[color][static_cast<std::size_t>(type)] |=
+                          piece_map;
+                  }
+          """
+          if old not in text:
+              raise SystemExit("format target missing")
+          path.write_text(text.replace(old, new))
+          PY
+      - name: Commit formatting
+        run: |
+          git config user.name "Proton audit automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add src/engine/eval.cpp
+          git commit -m "Normalize evaluator fast-path formatting [format-applied]"
+          git push
