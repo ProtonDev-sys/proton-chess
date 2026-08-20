@@ -1,0 +1,26 @@
+name: Apply fixed-node tooling patch
+
+on:
+  push:
+    branches: [agent/fixed-node-ab-matches]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply and commit the staged patch
+        run: |
+          git apply .github/fixed-node-tool.patch
+          rm .github/fixed-node-tool.patch
+          rm .github/workflows/apply-fixed-node-tool.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add deterministic fixed-node A/B matches"
+          git push origin HEAD:${GITHUB_REF_NAME}
