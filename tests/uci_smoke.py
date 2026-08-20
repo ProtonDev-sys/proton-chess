@@ -141,6 +141,7 @@ def check_limiter_option_state(binary: Path) -> None:
         "setoption name HumanStyle value false",
         "setoption name HumanSkill value 20",
         "setoption name HumanMaxLossCp value 12",
+        "setoption name HumanVariety value 35",
         "setoption name HumanSeed value 0",
         "setoption name MoveOverhead value 25",
         "setoption name Contempt value 0",
@@ -155,14 +156,23 @@ def check_limiter_option_state(binary: Path) -> None:
         "setoption name UCI_Elo value 800",
         seed,
     ])
+    zero_variety = fixed_depth_move(binary, [
+        "setoption name HumanStyle value true",
+        "setoption name HumanSkill value 0",
+        "setoption name HumanMaxLossCp value 250",
+        "setoption name HumanVariety value 0",
+        seed,
+    ])
     assert replayed_defaults == fresh, (fresh, replayed_defaults)
     assert skill_round_trip == fresh, (fresh, skill_round_trip)
     assert disabled_uci_elo == fresh, (fresh, disabled_uci_elo)
+    assert zero_variety == fresh, (fresh, zero_variety)
 
     custom = [
         "setoption name HumanStyle value true",
         "setoption name HumanSkill value 0",
         "setoption name HumanMaxLossCp value 250",
+        "setoption name HumanVariety value 100",
     ]
     sensitivity_exercised = False
     for seed_value in (1, 7, 27, 42, 99):
@@ -172,6 +182,7 @@ def check_limiter_option_state(binary: Path) -> None:
             "setoption name HumanStyle value true",
             "setoption name HumanSkill value 20",
             "setoption name HumanMaxLossCp value 8",
+            "setoption name HumanVariety value 100",
             custom_seed,
         ])
         after_disabled_uci_elo = fixed_depth_move(
@@ -210,6 +221,8 @@ def main() -> int:
         assert any("option name BookRandomness type spin default 0 min 0 max 100" in line
                    for line in uci_lines)
         assert any("option name UCI_Elo type spin default 2800 min 800 max 3000" in line
+                   for line in uci_lines)
+        assert any("option name HumanVariety type spin default 35 min 0 max 100" in line
                    for line in uci_lines)
         assert not any("option name Backend" in line for line in uci_lines)
         assert not any("option name SyzygyPath" in line for line in uci_lines)

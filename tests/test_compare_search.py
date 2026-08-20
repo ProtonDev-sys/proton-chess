@@ -273,6 +273,7 @@ class CompareSearchTests(unittest.TestCase):
         self.assertEqual(configuration["Threads"], 1)
         self.assertFalse(configuration["UseBook"])
         self.assertFalse(configuration["HumanStyle"])
+        self.assertEqual(configuration["HumanVariety"], 35)
         self.assertFalse(configuration["UCI_LimitStrength"])
         self.assertEqual(list(configuration)[-1], "UCI_LimitStrength")
 

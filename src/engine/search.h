@@ -159,6 +159,7 @@ private:
     bool main_phase_ = false;
     bool main_budget_exhausted_ = false;
     bool selection_budget_reserved_ = false;
+    bool selection_opportunity_ = false;
 
     std::array<std::array<Move, 2>, MaxPly> killers_{};
     std::array<std::array<std::array<int, 64>, 64>, 2> history_{};

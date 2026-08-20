@@ -20,10 +20,11 @@ Use the engine through any UCI-compatible chess interface. The direct controls a
 setoption name HumanStyle value true
 setoption name HumanSkill value 20
 setoption name HumanMaxLossCp value 12
+setoption name HumanVariety value 35
 setoption name HumanSeed value 1
 ```
 
-`HumanSkill` ranges from 0 to 20. Lower values widen the set of acceptable alternatives. `HumanMaxLossCp` sets the intentional centipawn-loss ceiling at skill 20, and `HumanSeed` makes move variety reproducible.
+`HumanSkill` ranges from 0 to 20. Lower values widen the set of acceptable alternatives. `HumanMaxLossCp` sets the intentional centipawn-loss ceiling at skill 20. `HumanVariety` is the percentage chance that a position is allowed to consider a verified alternative; it controls opportunity frequency rather than error size. `HumanSeed` makes both the opportunity decision and move choice reproducible.
 
 For standard UCI strength limiting, use:
 
@@ -32,9 +33,9 @@ setoption name UCI_LimitStrength value true
 setoption name UCI_Elo value 2200
 ```
 
-The supported UCI Elo range is 800–3000. The Elo control maps to the same bounded human selector rather than merely cutting search depth.
+The supported UCI Elo range is 800–3000. The Elo control maps to the same bounded human selector rather than merely cutting search depth. Its profiles independently taper the acceptable loss and alternative-selection opportunity rate; these modes are behavioral presets, not certified rating guarantees.
 
-Human mode does not blindly add noise. It preserves forced mates, filters alternatives against the configured loss allowance, and confirms a sampled candidate with a separate restricted search before returning it. The style policy favours normal development, castling, central pawn play, phase-appropriate king activity, and tactical moves when they are justified.
+Human mode does not blindly add noise. A failed opportunity roll returns the full-search move without reserving confirmation budget. An active opportunity preserves forced mates, filters alternatives against the configured loss allowance, and confirms a sampled candidate with a separate restricted search before returning it. The style policy favours normal development, castling, central pawn play, phase-appropriate king activity, and tactical moves when they are justified.
 
 ## Validation and benchmarking
 

@@ -550,39 +550,62 @@ void test_search_tactics() {
         const int legacy_loss = std::clamp(
             (proton::UciEloLegacyTop - elo) / 8, 8, 250);
         expect(profile.skill == std::clamp((elo - proton::UciEloMin) / 100, 0, 20) &&
-                   profile.max_loss_cp == legacy_loss,
-               "Elo profile preserves the legacy mapping at " + std::to_string(elo));
+                   profile.max_loss_cp == legacy_loss &&
+                   profile.variety_percent >= 15 &&
+                   profile.variety_percent <= 85,
+               "Elo profile preserves the legacy loss mapping and bounded variety at " +
+                   std::to_string(elo));
     }
     int previous_high_elo_loss = 8;
+    int previous_high_elo_variety = 15;
     for (int elo = proton::UciEloLegacyTop + 1; elo <= proton::UciEloMax; ++elo) {
         const proton::UciEloProfile profile = proton::uci_elo_profile(elo);
         expect(profile.skill == 20 && profile.max_loss_cp >= 0 &&
-                   profile.max_loss_cp <= previous_high_elo_loss,
+                   profile.max_loss_cp <= previous_high_elo_loss &&
+                   profile.variety_percent >= 5 &&
+                   profile.variety_percent <= previous_high_elo_variety,
                "high-Elo profile is monotonic at " + std::to_string(elo));
         previous_high_elo_loss = profile.max_loss_cp;
+        previous_high_elo_variety = profile.variety_percent;
     }
     const proton::UciEloProfile elo_800 = proton::uci_elo_profile(800);
+    const proton::UciEloProfile elo_1200 = proton::uci_elo_profile(1200);
+    const proton::UciEloProfile elo_1800 = proton::uci_elo_profile(1800);
+    const proton::UciEloProfile elo_2400 = proton::uci_elo_profile(2400);
     const proton::UciEloProfile elo_2800 = proton::uci_elo_profile(2800);
     const proton::UciEloProfile elo_2900 = proton::uci_elo_profile(2900);
     const proton::UciEloProfile elo_2999 = proton::uci_elo_profile(2999);
     const proton::UciEloProfile elo_3000 = proton::uci_elo_profile(3000);
-    expect(elo_800.skill == 0 && elo_800.max_loss_cp == 250,
-           "Elo 800 retains the legacy limiter profile");
-    expect(elo_2800.skill == 20 && elo_2800.max_loss_cp == 8,
-           "Elo 2800 retains the legacy limiter profile");
-    expect(elo_2900.skill == 20 && elo_2900.max_loss_cp == 4,
-           "Elo 2900 tapers the intentional loss allowance");
-    expect(elo_2999.skill == 20 && elo_2999.max_loss_cp == 1,
-           "only Elo 3000 reaches the zero-loss profile");
-    expect(elo_3000.skill == 20 && elo_3000.max_loss_cp == 0,
-           "Elo 3000 permits only equally scored alternatives");
+    expect(elo_800.skill == 0 && elo_800.max_loss_cp == 250 &&
+               elo_800.variety_percent == 85,
+           "Elo 800 retains the loss profile with frequent human opportunities");
+    expect(elo_1200.variety_percent == 71 &&
+               elo_1800.variety_percent == 50 &&
+               elo_2400.variety_percent == 29,
+           "Elo 1200/1800/2400 independently taper opportunity frequency");
+    expect(elo_2800.skill == 20 && elo_2800.max_loss_cp == 8 &&
+               elo_2800.variety_percent == 15,
+           "Elo 2800 retains the loss profile with sparse opportunities");
+    expect(elo_2900.skill == 20 && elo_2900.max_loss_cp == 4 &&
+               elo_2900.variety_percent == 10,
+           "Elo 2900 tapers loss and opportunity frequency");
+    expect(elo_2999.skill == 20 && elo_2999.max_loss_cp == 1 &&
+               elo_2999.variety_percent == 5,
+           "only Elo 3000 reaches zero loss while high Elo keeps rare variety");
+    expect(elo_3000.skill == 20 && elo_3000.max_loss_cp == 0 &&
+               elo_3000.variety_percent == 5,
+           "Elo 3000 permits only rare equally scored alternatives");
     expect(proton::uci_elo_profile(proton::UciEloMin - 1).skill == elo_800.skill &&
                proton::uci_elo_profile(proton::UciEloMin - 1).max_loss_cp ==
-                   elo_800.max_loss_cp,
+                   elo_800.max_loss_cp &&
+               proton::uci_elo_profile(proton::UciEloMin - 1).variety_percent ==
+                   elo_800.variety_percent,
            "Elo profile clamps below the advertised minimum");
     expect(proton::uci_elo_profile(proton::UciEloMax + 1).skill == elo_3000.skill &&
                proton::uci_elo_profile(proton::UciEloMax + 1).max_loss_cp ==
-                   elo_3000.max_loss_cp,
+                   elo_3000.max_loss_cp &&
+               proton::uci_elo_profile(proton::UciEloMax + 1).variety_percent ==
+                   elo_3000.variety_percent,
            "Elo profile clamps above the advertised maximum");
 
     proton::EngineOptions options;
@@ -611,6 +634,7 @@ void test_search_tactics() {
     options.human_style = true;
     options.human_skill = 0;
     options.human_max_loss_cp = 500;
+    options.human_variety_percent = 100;
     options.human_seed = 7;
     evaluator.set_options(options);
     search.set_options(options);
@@ -698,7 +722,7 @@ void test_search_tactics() {
     proton::EngineOptions elo_3000_options = full_options;
     elo_3000_options.uci_limit_strength = true;
     elo_3000_options.uci_elo = 3000;
-    elo_3000_options.human_seed = 27;
+    elo_3000_options.human_seed = 667;
     proton::Evaluator elo_3000_evaluator;
     elo_3000_evaluator.set_options(elo_3000_options);
     auto elo_3000_search =
@@ -708,7 +732,7 @@ void test_search_tactics() {
     const proton::SearchResult elo_3000_result =
         elo_3000_search->think(elo_3000_position, zero_loss_limits);
     expect(elo_3000_result.best != zero_loss_full_result.best,
-           "Elo 3000 regression exercises a real alternative");
+           "a seeded rare Elo 3000 opportunity exercises a real alternative");
 
     proton::Evaluator zero_loss_verify_evaluator;
     zero_loss_verify_evaluator.set_options(full_options);
@@ -726,7 +750,10 @@ void test_search_tactics() {
            "Elo 3000 confirms an alternative is independently equal or better");
 
     proton::EngineOptions interrupted_options = full_options;
-    interrupted_options.uci_limit_strength = true;
+    interrupted_options.human_style = true;
+    interrupted_options.human_skill = 0;
+    interrupted_options.human_max_loss_cp = 500;
+    interrupted_options.human_variety_percent = 100;
     interrupted_options.human_seed = 27;
     proton::Evaluator interrupted_evaluator;
     interrupted_evaluator.set_options(interrupted_options);
@@ -834,6 +861,24 @@ void test_search_tactics() {
                std::to_string(full_node_result.depth) + ", nodes " +
                std::to_string(full_node_result.nodes) + ")");
 
+    proton::EngineOptions zero_variety_options = interrupted_options;
+    zero_variety_options.human_variety_percent = 0;
+    proton::Evaluator zero_variety_evaluator;
+    zero_variety_evaluator.set_options(zero_variety_options);
+    auto zero_variety_search =
+        std::make_unique<proton::Search>(zero_variety_evaluator,
+                                         zero_variety_options);
+    proton::Position zero_variety_position;
+    expect(zero_variety_position.set_fen(loss_band_fen),
+           "zero-variety node-limit FEN parses");
+    const proton::SearchResult zero_variety_result =
+        zero_variety_search->think(zero_variety_position, full_node_limits);
+    expect(zero_variety_result.best == full_node_result.best &&
+               zero_variety_result.depth == full_node_result.depth &&
+               zero_variety_result.nodes == full_node_result.nodes,
+           "HumanVariety 0 bypasses confirmation reservation and keeps the full "
+           "bounded search budget");
+
     proton::Evaluator elo_3000_node_evaluator;
     elo_3000_node_evaluator.set_options(elo_3000_options);
     auto elo_3000_node_search =
@@ -869,8 +914,10 @@ void test_search_tactics() {
                std::to_string(confirmation_full_result.depth) + ")");
 
     proton::EngineOptions confirmation_options = full_options;
-    confirmation_options.uci_limit_strength = true;
-    confirmation_options.uci_elo = 2600;
+    confirmation_options.human_style = true;
+    confirmation_options.human_skill = 18;
+    confirmation_options.human_max_loss_cp = 25;
+    confirmation_options.human_variety_percent = 100;
 
     const auto confirmation_score_for = [&](const proton::Move& selected) {
         proton::Evaluator verify_evaluator;
@@ -1041,6 +1088,7 @@ void test_search_tactics() {
     tight_wide_options.human_skill = 19;
     // Skill 19 adds 8 + 2 cp, giving a 50 cp effective allowance.
     tight_wide_options.human_max_loss_cp = 40;
+    tight_wide_options.human_variety_percent = 100;
     proton::SearchResult tight_wide_result = tight_full_result;
     std::uint64_t tight_seed = 0;
     for (std::uint64_t seed = 1; seed <= 128; ++seed) {
@@ -1114,6 +1162,7 @@ void test_search_tactics() {
     options.human_style = false;
     options.human_skill = 20;
     options.human_max_loss_cp = 12;
+    options.human_variety_percent = 35;
     options.human_seed = 0;
     evaluator.set_options(options);
     search.set_options(options);
