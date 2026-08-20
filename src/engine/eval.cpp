@@ -17,8 +17,57 @@ constexpr std::array<int, 6> EgValue = {120, 305, 325, 525, 930, 0};
 constexpr std::array<int, 6> PhaseValue = {0, 1, 1, 2, 4, 0};
 constexpr std::array<int, 8> PassedMg = {0, 4, 10, 20, 38, 65, 105, 0};
 constexpr std::array<int, 8> PassedEg = {0, 8, 18, 34, 58, 92, 145, 0};
-Bitboard piece_attacks(const Position& position, PieceType type, int square, Color color) {
-    const Bitboard occupied = position.occupancy_all();
+
+[[nodiscard]] consteval std::array<std::array<Bitboard, 64>, 2>
+make_passed_pawn_masks() {
+    std::array<std::array<Bitboard, 64>, 2> masks{};
+    for (Color color : {White, Black}) {
+        for (int square = 0; square < 64; ++square) {
+            const int file = file_of(square);
+            const int start_rank = rank_of(square);
+            const int rank_step = color == White ? 1 : -1;
+            for (int rank = start_rank + rank_step;
+                 rank >= 0 && rank < 8; rank += rank_step) {
+                for (int candidate_file = std::max(0, file - 1);
+                     candidate_file <= std::min(7, file + 1); ++candidate_file) {
+                    masks[color][square] |= bit(rank * 8 + candidate_file);
+                }
+            }
+        }
+    }
+    return masks;
+}
+
+[[nodiscard]] consteval std::array<Bitboard, 64> make_connected_pawn_masks() {
+    std::array<Bitboard, 64> masks{};
+    for (int square = 0; square < 64; ++square) {
+        const int file = file_of(square);
+        const int rank = rank_of(square);
+        for (int file_step : {-1, 1}) {
+            const int candidate_file = file + file_step;
+            if (candidate_file < 0 || candidate_file > 7) continue;
+            for (int rank_step = -1; rank_step <= 1; ++rank_step) {
+                const int candidate_rank = rank + rank_step;
+                if (candidate_rank < 0 || candidate_rank > 7) continue;
+                masks[square] |= bit(candidate_rank * 8 + candidate_file);
+            }
+        }
+    }
+    return masks;
+}
+
+inline constexpr auto PassedPawnMasks = make_passed_pawn_masks();
+inline constexpr auto ConnectedPawnMasks = make_connected_pawn_masks();
+
+static_assert((PassedPawnMasks[White][8] & bit(17)) != 0);
+static_assert((PassedPawnMasks[White][8] & bit(9)) == 0);
+static_assert((PassedPawnMasks[Black][55] & bit(46)) != 0);
+static_assert((PassedPawnMasks[Black][55] & bit(54)) == 0);
+static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
+              (bit(1) | bit(9) | bit(17)));
+
+[[nodiscard]] Bitboard piece_attacks(PieceType type, int square, Color color,
+                                     Bitboard occupied) {
     switch (type) {
     case Pawn: return attacks::pawn(color, square);
     case Knight: return attacks::Knight[square];
@@ -30,48 +79,45 @@ Bitboard piece_attacks(const Position& position, PieceType type, int square, Col
     }
 }
 
-int relative_rank(Color color, int square) {
+[[nodiscard]] int relative_rank(Color color, int square) {
     return color == White ? rank_of(square) : 7 - rank_of(square);
 }
 
-int centre_distance(int square) {
+[[nodiscard]] int centre_distance(int square) {
     const int file_twice = std::abs(2 * file_of(square) - 7);
     const int rank_twice = std::abs(2 * rank_of(square) - 7);
     return file_twice + rank_twice;
 }
 
-bool is_passed_pawn(const Position& position, Color color, int square) {
-    const Piece enemy_pawn = make_piece(opposite(color), Pawn);
-    const int file = file_of(square);
-    const int step = color == White ? 8 : -8;
-    for (int scan = square + step; attacks::on_board(scan); scan += step) {
-        const int rank = rank_of(scan);
-        for (int test_file = std::max(0, file - 1); test_file <= std::min(7, file + 1);
-             ++test_file) {
-            if (position.piece_at(rank * 8 + test_file) == enemy_pawn) return false;
-        }
-    }
-    return true;
+[[nodiscard]] bool is_passed_pawn(Bitboard enemy_pawns, Color color, int square) {
+    return (enemy_pawns & PassedPawnMasks[color][square]) == 0;
 }
 
-bool connected_pawn(Bitboard pawns, int square) {
-    const int rank = rank_of(square);
-    const int file = file_of(square);
-    for (int df : {-1, 1}) {
-        const int adjacent_file = file + df;
-        if (adjacent_file < 0 || adjacent_file > 7) continue;
-        for (int dr : {-1, 0, 1}) {
-            const int adjacent_rank = rank + dr;
-            if (adjacent_rank < 0 || adjacent_rank > 7) continue;
-            if ((pawns & bit(adjacent_rank * 8 + adjacent_file)) != 0) return true;
+[[nodiscard]] bool connected_pawn(Bitboard pawns, int square) {
+    return (pawns & ConnectedPawnMasks[square]) != 0;
+}
+
+[[nodiscard]] int non_pawn_material(const Position& position) {
+    int total = 0;
+    for (Color color : {White, Black}) {
+        for (PieceType type : {Knight, Bishop, Rook, Queen}) {
+            total += std::popcount(position.pieces(make_piece(color, type))) *
+                     piece_value(type);
         }
     }
-    return false;
+    return total;
+}
+
+[[nodiscard]] Bitboard home_minor_mask(Color color) {
+    if (color == White) {
+        return bit(1) | bit(2) | bit(5) | bit(6);
+    }
+    return bit(57) | bit(58) | bit(61) | bit(62);
 }
 
 int king_safety(const Position& position, Color color,
                 const std::array<std::array<std::uint8_t, 8>, 2>& pawn_files,
-                const std::array<Bitboard, 2>& attacks) {
+                const std::array<Bitboard, 2>& attack_maps) {
     const int king = position.king_square(color);
     if (king == NoSquare) return -500;
 
@@ -103,7 +149,7 @@ int king_safety(const Position& position, Color color,
     }
 
     const Bitboard ring = attacks::King[king] | bit(king);
-    const int ring_attacks = std::popcount(attacks[opposite(color)] & ring);
+    const int ring_attacks = std::popcount(attack_maps[opposite(color)] & ring);
     safety -= ring_attacks * 7;
 
     // Open/semi-open files adjacent to the king are dangerous, especially when
@@ -116,13 +162,16 @@ int king_safety(const Position& position, Color color,
             const int king_file = file + df;
             if (king_file < 0 || king_file > 7) continue;
             if (pawn_files[color][king_file] == 0) safety -= 8;
-            if (pawn_files[color][king_file] == 0 && pawn_files[enemy][king_file] == 0) safety -= 5;
+            if (pawn_files[color][king_file] == 0 &&
+                pawn_files[enemy][king_file] == 0) {
+                safety -= 5;
+            }
         }
     }
     return safety;
 }
 
-int capture_gain(const Position& position, const Move& move) {
+[[nodiscard]] int capture_gain(const Position& position, const Move& move) {
     Piece victim = position.piece_at(move.to);
     if ((move.flags & MoveEnPassant) != 0) {
         victim = make_piece(opposite(position.side_to_move()), Pawn);
@@ -157,6 +206,8 @@ const CoreEvalNet::PawnCacheEntry& CoreEvalNet::pawn_info(
     for (Color color : {White, Black}) {
         const int sign = color == White ? 1 : -1;
         const Bitboard all_pawns = position.pieces(make_piece(color, Pawn));
+        const Bitboard enemy_pawns =
+            position.pieces(make_piece(opposite(color), Pawn));
         Bitboard pawns = all_pawns;
         while (pawns != 0) {
             const int square = static_cast<int>(std::countr_zero(pawns));
@@ -195,7 +246,7 @@ const CoreEvalNet::PawnCacheEntry& CoreEvalNet::pawn_info(
             pawns &= pawns - 1;
             const int rr = relative_rank(color, square);
             const bool connected = connected_pawn(all_pawns, square);
-            if (is_passed_pawn(position, color, square)) {
+            if (is_passed_pawn(enemy_pawns, color, square)) {
                 entry.passed[color] |= bit(square);
                 int mg_bonus = PassedMg[rr];
                 int eg_bonus = PassedEg[rr];
@@ -219,12 +270,15 @@ int CoreEvalNet::evaluate(const Position& position) const {
     int mg = pawn.mg;
     int eg = pawn.eg;
     int phase = 0;
-    int white_material = std::popcount(position.pieces(WhitePawn)) * EgValue[Pawn];
-    int black_material = std::popcount(position.pieces(BlackPawn)) * EgValue[Pawn];
+    int white_material =
+        std::popcount(position.pieces(WhitePawn)) * EgValue[Pawn];
+    int black_material =
+        std::popcount(position.pieces(BlackPawn)) * EgValue[Pawn];
     std::array<int, 2> bishops{};
     const auto& pawn_files = pawn.files;
     const auto& pawn_attacks = pawn.attacks;
     std::array<Bitboard, 2> attack_map = pawn_attacks;
+    const Bitboard occupied = position.occupancy_all();
 
     for (Color color : {White, Black}) {
         const int sign = color == White ? 1 : -1;
@@ -274,7 +328,8 @@ int CoreEvalNet::evaluate(const Position& position) const {
                     break;
                 }
 
-                const Bitboard piece_map = piece_attacks(position, type, square, color);
+                const Bitboard piece_map =
+                    piece_attacks(type, square, color, occupied);
                 attack_map[color] |= piece_map;
                 Bitboard mobility_map = piece_map & ~own;
                 if (type == Knight || type == Bishop) {
@@ -331,7 +386,7 @@ int CoreEvalNet::evaluate(const Position& position) const {
             // while staying active. The sliding ray also ensures that no
             // intervening piece can earn the bonus.
             Bitboard supporting_rooks =
-                attacks::rook(square, position.occupancy_all()) &
+                attacks::rook(square, occupied) &
                 position.pieces(make_piece(color, Rook));
             while (supporting_rooks != 0) {
                 const int rook_square =
@@ -351,7 +406,8 @@ int CoreEvalNet::evaluate(const Position& position) const {
                 const int square = static_cast<int>(std::countr_zero(pieces));
                 pieces &= pieces - 1;
                 const int rr = relative_rank(color, square);
-                if (rr >= 3 && rr <= 5 && (pawn_attacks[color] & bit(square)) != 0 &&
+                if (rr >= 3 && rr <= 5 &&
+                    (pawn_attacks[color] & bit(square)) != 0 &&
                     (pawn_attacks[opposite(color)] & bit(square)) == 0) {
                     mg += sign * (type == Knight ? 18 : 10);
                     eg += sign * (type == Knight ? 12 : 8);
@@ -382,15 +438,17 @@ int CoreEvalNet::evaluate(const Position& position) const {
     // Conversion guidance in low-material positions: bring the winning king
     // closer and drive the losing king away from the centre.
     const int material_diff = white_material - black_material;
-    if (std::abs(material_diff) >= 250 && white_material + black_material < 2600) {
+    if (std::abs(material_diff) >= 250 &&
+        white_material + black_material < 2600) {
         const Color winner = material_diff > 0 ? White : Black;
         const Color loser = opposite(winner);
         const int winner_king = position.king_square(winner);
         const int loser_king = position.king_square(loser);
         if (winner_king != NoSquare && loser_king != NoSquare) {
             const int edge = centre_distance(loser_king);
-            const int king_distance = std::abs(file_of(winner_king) - file_of(loser_king)) +
-                                      std::abs(rank_of(winner_king) - rank_of(loser_king));
+            const int king_distance =
+                std::abs(file_of(winner_king) - file_of(loser_king)) +
+                std::abs(rank_of(winner_king) - rank_of(loser_king));
             const int mop_up = edge * 3 + (14 - king_distance) * 2;
             eg += winner == White ? mop_up : -mop_up;
         }
@@ -415,8 +473,8 @@ bool DeepEvalNet::available() const {
 
 int DeepEvalNet::evaluate(const Position&) const { return 0; }
 
-std::vector<float> DeepEvalNet::score_moves(const Position&,
-                                             const std::vector<Move>& moves) const {
+std::vector<float> DeepEvalNet::score_moves(
+    const Position&, const std::vector<Move>& moves) const {
     return std::vector<float>(moves.size(), 0.0F);
 }
 
@@ -434,7 +492,8 @@ void Evaluator::clear_cache() {
 }
 
 int Evaluator::evaluate(const Position& position, bool deep_hint) const {
-    const std::size_t index = static_cast<std::size_t>(position.key()) & (cache_.size() - 1);
+    const std::size_t index =
+        static_cast<std::size_t>(position.key()) & (cache_.size() - 1);
     CacheEntry& entry = cache_[index];
     if (entry.valid && entry.key == position.key()) return entry.score;
 
@@ -446,40 +505,73 @@ int Evaluator::evaluate(const Position& position, bool deep_hint) const {
     return score;
 }
 
-std::vector<float> Evaluator::policy_scores(const Position& position,
-                                             const std::vector<Move>& moves) const {
+std::vector<float> Evaluator::policy_scores(
+    const Position& position, const std::vector<Move>& moves) const {
     std::vector<float> scores;
     scores.reserve(moves.size());
     Position copy = position;
 
+    const Color side = position.side_to_move();
+    const bool early_opening = position.fullmove_number() <= 10;
+    const bool king_endgame =
+        (position.pieces(WhiteQueen) | position.pieces(BlackQueen)) == 0 &&
+        non_pawn_material(position) <= 2200;
+    const Bitboard home_minors =
+        (position.pieces(make_piece(side, Knight)) |
+         position.pieces(make_piece(side, Bishop))) &
+        home_minor_mask(side);
+    const int undeveloped_minors = std::popcount(home_minors);
+
     for (const Move& move : moves) {
         const Piece piece = position.piece_at(move.from);
+        const PieceType type = piece_type(piece);
+        const float centrality =
+            static_cast<float>(14 - centre_distance(move.to));
         float score = 0.0F;
-        score += static_cast<float>(14 - centre_distance(move.to)) * 0.18F;
+
+        // Centralisation is natural for every piece except a middlegame king.
+        // In reduced material, switch the king back to an active endgame role.
+        if (type == King) {
+            score += centrality * (king_endgame ? 0.24F : -0.10F);
+        } else {
+            score += centrality * 0.18F;
+        }
+
         if (move.is_capture()) {
-            const int attacker = piece_value(piece_type(piece));
+            const int attacker = piece_value(type);
             score += static_cast<float>(capture_gain(position, move)) * 0.018F;
             score -= static_cast<float>(attacker) * 0.002F;
         }
         if (move.is_promotion()) {
-            score += 8.0F + static_cast<float>(piece_value(move.promotion)) * 0.006F;
+            score += 8.0F +
+                     static_cast<float>(piece_value(move.promotion)) * 0.006F;
         }
-        if (move.is_castle()) score += 5.0F;
+        if (move.is_castle()) score += king_endgame ? 1.5F : 5.0F;
 
-        const bool early_opening = position.fullmove_number() <= 10;
         const bool home_knight =
             (piece == WhiteKnight && (move.from == 1 || move.from == 6)) ||
             (piece == BlackKnight && (move.from == 57 || move.from == 62));
+        const bool home_bishop =
+            (piece == WhiteBishop && (move.from == 2 || move.from == 5)) ||
+            (piece == BlackBishop && (move.from == 58 || move.from == 61));
         if (home_knight) {
             const int destination_file = file_of(move.to);
             if (destination_file >= 2 && destination_file <= 5) score += 2.8F;
             else score -= 0.9F;  // Do not mistake Na3/Nh3 for normal development.
         }
-        if ((piece == WhiteBishop && (move.from == 2 || move.from == 5)) ||
-            (piece == BlackBishop && (move.from == 58 || move.from == 61))) {
-            score += 1.8F;
+        if (home_bishop) score += 1.8F;
+
+        // Humans normally finish developing before spending another quiet
+        // tempo on an already-developed minor. Tactical captures are exempt.
+        if (early_opening && undeveloped_minors > 0 &&
+            (type == Knight || type == Bishop) &&
+            !home_knight && !home_bishop &&
+            !move.is_capture() && !move.is_promotion()) {
+            score -= std::min(1.8F,
+                              static_cast<float>(undeveloped_minors) * 0.6F);
         }
-        if (early_opening && piece_type(piece) == Pawn) {
+
+        if (early_opening && type == Pawn) {
             const int source_file = file_of(move.from);
             if (source_file == 3 || source_file == 4) {
                 score += (move.flags & MoveDoublePush) != 0 ? 2.2F : 1.0F;
@@ -490,7 +582,7 @@ std::vector<float> Evaluator::policy_scores(const Position& position,
                 score -= 0.5F;
             }
         }
-        if (piece_type(piece) == Queen && position.fullmove_number() <= 7) score -= 1.5F;
+        if (type == Queen && position.fullmove_number() <= 7) score -= 1.5F;
 
         UndoState undo;
         if (copy.make_move(move, undo)) {

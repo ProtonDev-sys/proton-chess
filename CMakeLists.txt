@@ -66,6 +66,10 @@ if(PROTON_BUILD_TESTS)
     target_link_libraries(proton-tests PRIVATE proton_engine)
     add_test(NAME proton-tests COMMAND proton-tests)
 
+    add_executable(proton-human-policy-tests tests/test_human_policy.cpp)
+    target_link_libraries(proton-human-policy-tests PRIVATE proton_engine)
+    add_test(NAME proton-human-policy-tests COMMAND proton-human-policy-tests)
+
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME proton-uci-smoke
