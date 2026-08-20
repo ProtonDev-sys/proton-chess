@@ -531,6 +531,17 @@ void test_static_exchange() {
            "SEE terminates an exchange after a legal king capture");
     expect(evaluate("1N5k/P1K5/1r6/8/8/8/8/8 b - - 0 1", "b6b8") == -1030,
            "SEE prefers a safe promotion over a safe king recapture");
+
+    proton::Position malformed_promotion_position;
+    expect(malformed_promotion_position.set_fen(
+               "6k1/P7/8/8/8/8/8/6K1 w - - 0 1"),
+           "malformed SEE promotion FEN parses");
+    const proton::Move malformed_promotion{
+        48, 56, static_cast<proton::PieceType>(13), proton::MovePromotion};
+    expect(proton::static_exchange_eval(malformed_promotion_position,
+                                        malformed_promotion) ==
+               -proton::piece_value(proton::King),
+           "SEE rejects an out-of-range promotion type before indexing piece maps");
 }
 
 void test_search_tactics() {
