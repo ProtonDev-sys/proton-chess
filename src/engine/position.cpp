@@ -73,6 +73,7 @@ void Position::clear() {
     ep_ = NoSquare;
     halfmove_ = 0;
     fullmove_ = 1;
+    ep_hash_file_ = -1;
     key_ = 0;
     pawn_key_ = 0;
     history_keys_.clear();
@@ -116,7 +117,7 @@ void Position::move_piece(Piece piece, int from, int to) {
     add_piece(piece, to);
 }
 
-int Position::ep_hash_file() const {
+std::int8_t Position::ep_hash_file() const {
     if (ep_ == NoSquare) return -1;
     const Piece pawn = make_piece(stm_, Pawn);
     const Color them = opposite(stm_);
@@ -149,7 +150,7 @@ int Position::ep_hash_file() const {
         const Bitboard enemy_occupancy = occupancy_[them] & ~bit(captured_square);
         if (king != NoSquare &&
             (attacks::attackers_to(king, occupied, pieces) & enemy_occupancy) == 0) {
-            return file_of(ep_);
+            return static_cast<std::int8_t>(file_of(ep_));
         }
     }
     return -1;
@@ -265,6 +266,7 @@ bool Position::set_fen(const std::string& fen_text) {
     halfmove_ = halfmove;
     fullmove_ = fullmove;
     rebuild_bitboards();
+    ep_hash_file_ = ep_hash_file();
     key_ = compute_key();
     reset_history();
     return true;
@@ -704,12 +706,12 @@ bool Position::make_move_unchecked(const Move& move, UndoState& undo) {
     undo.ep_square = ep_;
     undo.halfmove_clock = halfmove_;
     undo.fullmove_number = fullmove_;
+    undo.ep_hash_file = ep_hash_file_;
     undo.key = key_;
 
     const auto& z = zobrist();
     key_ ^= z.castling[castling_ & 15];
-    const int old_ep_file = ep_hash_file();
-    if (old_ep_file >= 0) key_ ^= z.ep[old_ep_file];
+    if (ep_hash_file_ >= 0) key_ ^= z.ep[ep_hash_file_];
 
     key_ ^= z.piece[moving][move.from];
     if (captured != Empty) {
@@ -744,8 +746,8 @@ bool Position::make_move_unchecked(const Move& move, UndoState& undo) {
     stm_ = them;
 
     key_ ^= z.castling[castling_ & 15];
-    const int new_ep_file = ep_hash_file();
-    if (new_ep_file >= 0) key_ ^= z.ep[new_ep_file];
+    ep_hash_file_ = ep_hash_file();
+    if (ep_hash_file_ >= 0) key_ ^= z.ep[ep_hash_file_];
     key_ ^= z.side;
 
     push_history();
@@ -770,6 +772,7 @@ void Position::unmake_move(const Move& move, const UndoState& undo) {
     ep_ = undo.ep_square;
     halfmove_ = undo.halfmove_clock;
     fullmove_ = undo.fullmove_number;
+    ep_hash_file_ = undo.ep_hash_file;
 
     const Color us = stm_;
     Piece moved = board_[move.to];
@@ -798,12 +801,13 @@ void Position::make_null_move(UndoState& undo) {
     undo.ep_square = ep_;
     undo.halfmove_clock = halfmove_;
     undo.fullmove_number = fullmove_;
+    undo.ep_hash_file = ep_hash_file_;
     undo.key = key_;
 
     const auto& z = zobrist();
-    const int old_ep_file = ep_hash_file();
-    if (old_ep_file >= 0) key_ ^= z.ep[old_ep_file];
+    if (ep_hash_file_ >= 0) key_ ^= z.ep[ep_hash_file_];
     ep_ = NoSquare;
+    ep_hash_file_ = -1;
     stm_ = opposite(stm_);
     key_ ^= z.side;
     null_barriers_.push_back(history_keys_.size());
@@ -815,6 +819,7 @@ void Position::unmake_null_move(const UndoState& undo) {
     ep_ = undo.ep_square;
     halfmove_ = undo.halfmove_clock;
     fullmove_ = undo.fullmove_number;
+    ep_hash_file_ = undo.ep_hash_file;
     key_ = undo.key;
     if (!null_barriers_.empty()) null_barriers_.pop_back();
 }
