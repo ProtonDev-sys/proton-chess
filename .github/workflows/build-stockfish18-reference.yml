@@ -1,0 +1,33 @@
+name: Build Stockfish 18 reference
+
+on:
+  push:
+    branches: [agent/stockfish18-reference-artifact]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: official-stockfish/Stockfish
+          ref: sf_18
+          path: stockfish
+          persist-credentials: false
+      - name: Build official Stockfish 18
+        run: make -C stockfish/src -j2 profile-build ARCH=x86-64
+      - name: Verify UCI binary
+        run: printf 'uci\nquit\n' | stockfish/src/stockfish | grep -F 'id name Stockfish 18'
+      - uses: actions/upload-artifact@v6
+        with:
+          name: stockfish18-linux-x86-64
+          path: stockfish/src/stockfish
+          if-no-files-found: error
+          retention-days: 1
