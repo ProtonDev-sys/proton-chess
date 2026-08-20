@@ -113,6 +113,37 @@ struct SearchTestAccess {
             });
         return entry == found->second.end() ? 0 : entry->weight;
     }
+
+    static bool continuation_rows_follow_live_updates(Search& search) {
+        Position position;
+        const Move previous = position.parse_uci_move("e2e4");
+        UndoState undo;
+        if (previous.is_null() || !position.make_move(previous, undo)) return false;
+
+        const Move current = position.parse_uci_move("e7e5");
+        if (current.is_null()) return false;
+
+        search.move_stack_[0] = previous;
+        search.moved_piece_stack_[0] = position.piece_at(previous.to);
+        const Search::ContinuationRows rows = search.continuation_rows(1);
+        if (rows[0] == nullptr || rows[1] != nullptr) return false;
+
+        const int previous_state =
+            static_cast<int>(WhitePawn) * 64 + previous.to;
+        const int current_state =
+            static_cast<int>(BlackPawn) * 64 + current.to;
+        const std::size_t index =
+            static_cast<std::size_t>(previous_state) *
+                Search::HistoryStateCount +
+            current_state;
+
+        search.continuation_history_[index] = 11;
+        const int before = Search::continuation_score(position, current, rows);
+        search.continuation_history_[index] = 19;
+        const int after = Search::continuation_score(position, current, rows);
+        search.continuation_history_[index] = 0;
+        return before == 22 && after == 38;
+    }
 };
 
 }  // namespace proton
@@ -1289,6 +1320,17 @@ void test_search_tactics() {
            "quiet mate is preserved in the principal variation");
 }
 
+void test_live_continuation_rows() {
+    proton::EngineOptions options;
+    options.use_book = false;
+    options.hash_mb = 1;
+    proton::Evaluator evaluator;
+    evaluator.set_options(options);
+    proton::Search search(evaluator, options);
+    expect(proton::SearchTestAccess::continuation_rows_follow_live_updates(search),
+           "cached continuation rows observe sibling history updates");
+}
+
 void test_tt_same_key_replacement() {
     proton::EngineOptions options;
     options.hash_mb = 1;
@@ -1494,6 +1536,7 @@ int main() {
     test_static_exchange();
     test_book_selection();
     test_search_tactics();
+    test_live_continuation_rows();
     test_tt_same_key_replacement();
     test_confirmation_node_cap();
     test_qsearch_keeps_delta_pruned_checking_captures();

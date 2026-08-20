@@ -389,9 +389,10 @@ int Search::promotion_gain(const Move& move) {
     return move.is_promotion() ? piece_value(move.promotion) - piece_value(Pawn) : 0;
 }
 
-int Search::move_order_score(const Position& position, const Move& move,
-                             int ply, const Move& tt_move, bool captures_only,
-                             int see) const {
+int Search::move_order_score(
+    const Position& position, const Move& move, int ply,
+    const Move& tt_move, bool captures_only, int see,
+    const ContinuationRows& continuation_rows) const {
     if (same_move(move, tt_move)) return 30'000'000;
 
     const Piece attacker_piece = position.piece_at(move.from);
@@ -429,11 +430,12 @@ int Search::move_order_score(const Position& position, const Move& move,
 
     const Color side = position.side_to_move();
     return history_[side][move.from][move.to] +
-           continuation_score(position, move, ply);
+           continuation_score(position, move, continuation_rows);
 }
 
 void Search::score_moves(const Position& position, const std::vector<Move>& moves,
-                                  int ply, const Move& tt_move, bool captures_only) {
+                         int ply, const Move& tt_move, bool captures_only,
+                         const ContinuationRows& continuation_rows) {
     std::vector<ScoredMove>& list = move_lists_[ply];
     list.clear();
     list.reserve(std::max(list.capacity(), moves.size()));
@@ -442,7 +444,9 @@ void Search::score_moves(const Position& position, const std::vector<Move>& move
             ? static_exchange_eval(position, move)
             : 0;
         list.push_back(ScoredMove{
-            move, move_order_score(position, move, ply, tt_move, captures_only, see), see});
+            move, move_order_score(position, move, ply, tt_move, captures_only,
+                                   see, continuation_rows),
+            see});
     }
 }
 
@@ -482,27 +486,39 @@ void Search::apply_continuation_bonus(std::int16_t& value, int bonus) {
     value = static_cast<std::int16_t>(std::clamp(updated, -MaxHistory, MaxHistory));
 }
 
-int Search::continuation_score(const Position& position, const Move& move, int ply) const {
-    if (ply <= 0 || ply >= MaxPly || move.is_null()) return 0;
+Search::ContinuationRows Search::continuation_rows(int ply) const {
+    ContinuationRows rows{};
+    const auto row_for = [&](int offset,
+                             const std::vector<std::int16_t>& table) {
+        if (ply < offset) return static_cast<const std::int16_t*>(nullptr);
+        const Move previous = move_stack_[ply - offset];
+        const Piece previous_piece = moved_piece_stack_[ply - offset];
+        if (previous.is_null() || previous_piece == Empty) {
+            return static_cast<const std::int16_t*>(nullptr);
+        }
+        const int previous_state =
+            static_cast<int>(previous_piece) * 64 + previous.to;
+        return table.data() + static_cast<std::size_t>(previous_state) *
+                                  HistoryStateCount;
+    };
+    rows[0] = row_for(1, continuation_history_);
+    rows[1] = row_for(2, continuation_history_2_);
+    return rows;
+}
+
+int Search::continuation_score(
+    const Position& position, const Move& move,
+    const ContinuationRows& continuation_rows) {
+    if (move.is_null()) return 0;
     const Piece current_piece = position.piece_at(move.from);
     if (current_piece == Empty) return 0;
     const int current_state = static_cast<int>(current_piece) * 64 + move.to;
-
-    int score = 0;
-    const auto add_score = [&](int offset, const std::vector<std::int16_t>& table,
-                               int weight) {
-        if (ply < offset) return;
-        const Move previous = move_stack_[ply - offset];
-        const Piece previous_piece = moved_piece_stack_[ply - offset];
-        if (previous.is_null() || previous_piece == Empty) return;
-        const int previous_state = static_cast<int>(previous_piece) * 64 + previous.to;
-        const std::size_t index = static_cast<std::size_t>(previous_state) *
-                                  HistoryStateCount + current_state;
-        score += static_cast<int>(table[index]) * weight;
-    };
-    add_score(1, continuation_history_, 2);
-    add_score(2, continuation_history_2_, 1);
-    return score;
+    return (continuation_rows[0] != nullptr
+                ? static_cast<int>(continuation_rows[0][current_state]) * 2
+                : 0) +
+           (continuation_rows[1] != nullptr
+                ? static_cast<int>(continuation_rows[1][current_state])
+                : 0);
 }
 
 void Search::update_quiet_history(const Position& position, Color color,
@@ -761,7 +777,10 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     if (in_check) position.generate_pseudo_moves(pseudo);
     else position.generate_pseudo_captures(pseudo);
 
-    score_moves(position, pseudo, ply, tt_move, !in_check);
+    const ContinuationRows qsearch_continuation =
+        in_check ? continuation_rows(ply) : ContinuationRows{};
+    score_moves(position, pseudo, ply, tt_move, !in_check,
+                qsearch_continuation);
 
     int legal_moves = 0;
     int best = stand_pat;
@@ -958,7 +977,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         const int probcut_beta = std::min(MateThreshold - 1, beta + ProbCutMargin);
         std::vector<Move>& tactical = generated_moves_[ply];
         position.generate_pseudo_captures(tactical);
-        score_moves(position, tactical, ply, tt_move, true);
+        score_moves(position, tactical, ply, tt_move, true,
+                    ContinuationRows{});
 
         std::vector<ScoredMove>& ordered = move_lists_[ply];
         for (std::size_t move_index = 0; move_index < ordered.size(); ++move_index) {
@@ -1000,7 +1020,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
 
     std::vector<Move>& pseudo = generated_moves_[ply];
     position.generate_pseudo_moves(pseudo);
-    score_moves(position, pseudo, ply, tt_move, false);
+    const ContinuationRows node_continuation = continuation_rows(ply);
+    score_moves(position, pseudo, ply, tt_move, false, node_continuation);
 
     int legal_moves = 0;
     int quiet_moves = 0;
@@ -1022,7 +1043,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         const bool quiet = is_quiet(move);
         const int see = quiet ? 0 : ordered[move_index].see;
         const int history_score = quiet
-            ? history_[us][move.from][move.to] + continuation_score(position, move, ply)
+            ? history_[us][move.from][move.to] +
+                  continuation_score(position, move, node_continuation)
             : 0;
 
         UndoState undo;
