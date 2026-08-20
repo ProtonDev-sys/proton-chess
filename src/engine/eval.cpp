@@ -143,14 +143,11 @@ static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
 }
 
 [[nodiscard]] ThreatPenalty threat_penalty(PieceType victim,
-                                           int least_attacker,
-                                           bool defended) {
+                                           int least_attacker) {
     // Quiescence already resolves executable captures. Pricing loose pieces
     // here double-counts hanging material and makes shallow search unstable.
     // Static evaluation therefore measures only the positional pressure on a
     // defended piece attacked by a materially cheaper unit.
-    if (!defended) return {};
-
     const int victim_value = piece_value(victim);
     if (least_attacker + piece_value(Pawn) >= victim_value) return {};
 
@@ -176,13 +173,9 @@ void apply_threat_evaluation(const Position& position,
             const int square = static_cast<int>(std::countr_zero(threatened));
             threatened &= threatened - 1;
             const PieceType victim = piece_type(position.piece_at(square));
-            if (victim == NoPieceType || victim == Pawn || victim == King) continue;
-
-            constexpr bool defended = true;
-            const int attacker =
+            if (victim == NoPieceType || victim == Pawn || victim == King) continue;            const int attacker =
                 least_attacker_value(attacks_by_type[enemy], square);
-            const ThreatPenalty penalty =
-                threat_penalty(victim, attacker, defended);
+            const ThreatPenalty penalty = threat_penalty(victim, attacker);
             mg -= sign * penalty.mg;
             eg -= sign * penalty.eg;
         }
