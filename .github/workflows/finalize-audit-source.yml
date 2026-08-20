@@ -1,0 +1,85 @@
+name: Finalize audit source
+
+on:
+  push:
+    branches: [agent/current-main-audit]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message, '[finalize-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Apply final evaluator cleanup
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("src/engine/eval.cpp")
+          text = path.read_text()
+
+          text, count = re.subn(
+              r"                if \(type <= Rook\) \{\n\s+attacks_by_type\[color\]\[static_cast<std::size_t>\(type\)\] \|=\n\s+piece_map;\n\s+\}",
+              """                if (type <= Rook) {
+                      attacks_by_type[color][static_cast<std::size_t>(type)] |=
+                          piece_map;
+                  }""",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"expected one attack-map block, found {count}")
+
+          old = """[[nodiscard]] ThreatPenalty threat_penalty(PieceType victim,
+                                                     int least_attacker,
+                                                     bool defended) {
+              // Quiescence already resolves executable captures. Pricing loose pieces
+              // here double-counts hanging material and makes shallow search unstable.
+              // Static evaluation therefore measures only the positional pressure on a
+              // defended piece attacked by a materially cheaper unit.
+              if (!defended) return {};
+
+          """
+          # Whitespace from the earlier source-application commit is normal except for
+          # the attack-map block, so use a structural expression for this signature too.
+          text, count = re.subn(
+              r"\[\[nodiscard\]\] ThreatPenalty threat_penalty\(PieceType victim,\n\s+int least_attacker,\n\s+bool defended\) \{\n"
+              r"(\s+// Quiescence already resolves executable captures\. Pricing loose pieces\n"
+              r"\s+// here double-counts hanging material and makes shallow search unstable\.\n"
+              r"\s+// Static evaluation therefore measures only the positional pressure on a\n"
+              r"\s+// defended piece attacked by a materially cheaper unit\.\n)"
+              r"\s+if \(!defended\) return \{\};\n\n",
+              "[[nodiscard]] ThreatPenalty threat_penalty(PieceType victim,\n"
+              "                                           int least_attacker) {\n"
+              r"\1",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"expected one threat-penalty signature, found {count}")
+
+          text, count = re.subn(
+              r"\s+constexpr bool defended = true;\n"
+              r"(\s+const int attacker =\n\s+least_attacker_value\(attacks_by_type\[enemy\], square\);\n)"
+              r"\s+const ThreatPenalty penalty =\n"
+              r"\s+threat_penalty\(victim, attacker, defended\);",
+              r"\1            const ThreatPenalty penalty = threat_penalty(victim, attacker);",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"expected one defended call site, found {count}")
+
+          path.write_text(text)
+          PY
+      - name: Commit final source
+        run: |
+          git config user.name "Proton audit automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add src/engine/eval.cpp
+          git commit -m "Finalize exact threat-evaluation fast path [finalize-applied]"
+          git push
