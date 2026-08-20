@@ -18,6 +18,13 @@ constexpr std::array<int, 6> PhaseValue = {0, 1, 1, 2, 4, 0};
 constexpr std::array<int, 8> PassedMg = {0, 4, 10, 20, 38, 65, 105, 0};
 constexpr std::array<int, 8> PassedEg = {0, 8, 18, 34, 58, 92, 145, 0};
 
+using AttackByType = std::array<std::array<Bitboard, 6>, 2>;
+
+struct ThreatPenalty {
+    int mg = 0;
+    int eg = 0;
+};
+
 [[nodiscard]] consteval std::array<std::array<Bitboard, 64>, 2>
 make_passed_pawn_masks() {
     std::array<std::array<Bitboard, 64>, 2> masks{};
@@ -113,6 +120,75 @@ static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
         return bit(1) | bit(2) | bit(5) | bit(6);
     }
     return bit(57) | bit(58) | bit(61) | bit(62);
+}
+
+[[nodiscard]] int least_attacker_value(
+    const std::array<Bitboard, 6>& attacks_by_type, int square) {
+    const Bitboard target = bit(square);
+    for (PieceType type : {Pawn, Knight, Bishop, Rook, Queen, King}) {
+        if ((attacks_by_type[type] & target) != 0) return piece_value(type);
+    }
+    return piece_value(King);
+}
+
+[[nodiscard]] ThreatPenalty threat_penalty(PieceType victim,
+                                           int least_attacker,
+                                           bool defended,
+                                           bool attacker_to_move) {
+    const int victim_value = piece_value(victim);
+    ThreatPenalty penalty;
+
+    // A loose piece is tactically fragile even when the current search horizon
+    // does not yet contain the capture. Keep the term deliberately below the
+    // material value so search, not evaluation, remains authoritative.
+    if (!defended) {
+        penalty.mg += std::clamp(victim_value / 12, 8, 64);
+        penalty.eg += std::clamp(victim_value / 14, 6, 56);
+    }
+
+    // A defended piece still loses freedom when a cheaper unit attacks it: the
+    // opponent can often gain a tempo or force an unfavourable exchange.
+    if (least_attacker + 50 < victim_value) {
+        const int exchange_gap = victim_value - least_attacker;
+        penalty.mg += std::clamp(exchange_gap / 18, 6, 42);
+        penalty.eg += std::clamp(exchange_gap / 20, 5, 38);
+    }
+
+    // The threatened side can often answer immediately. Retain most of the
+    // signal for move ordering while distinguishing an executable threat from
+    // one that still has to survive the opponent's turn.
+    if (!attacker_to_move) {
+        penalty.mg = penalty.mg * 2 / 3;
+        penalty.eg = penalty.eg * 2 / 3;
+    }
+    return penalty;
+}
+
+void apply_threat_evaluation(const Position& position,
+                             const std::array<Bitboard, 2>& attack_maps,
+                             const AttackByType& attacks_by_type,
+                             int& mg, int& eg) {
+    for (Color color : {White, Black}) {
+        const Color enemy = opposite(color);
+        const int sign = color == White ? 1 : -1;
+        Bitboard threatened = position.occupancy(color) & attack_maps[enemy];
+        threatened &= ~position.pieces(make_piece(color, King));
+
+        while (threatened != 0) {
+            const int square = static_cast<int>(std::countr_zero(threatened));
+            threatened &= threatened - 1;
+            const PieceType victim = piece_type(position.piece_at(square));
+            if (victim == NoPieceType || victim == King) continue;
+
+            const bool defended = (attack_maps[color] & bit(square)) != 0;
+            const int attacker =
+                least_attacker_value(attacks_by_type[enemy], square);
+            const ThreatPenalty penalty = threat_penalty(
+                victim, attacker, defended, position.side_to_move() == enemy);
+            mg -= sign * penalty.mg;
+            eg -= sign * penalty.eg;
+        }
+    }
 }
 
 int king_safety(const Position& position, Color color,
@@ -277,7 +353,10 @@ int CoreEvalNet::evaluate(const Position& position) const {
     std::array<int, 2> bishops{};
     const auto& pawn_files = pawn.files;
     const auto& pawn_attacks = pawn.attacks;
-    std::array<Bitboard, 2> attack_map = pawn_attacks;
+    std::array<Bitboard, 2> attack_maps = pawn_attacks;
+    AttackByType attacks_by_type{};
+    attacks_by_type[White][Pawn] = pawn_attacks[White];
+    attacks_by_type[Black][Pawn] = pawn_attacks[Black];
     const Bitboard occupied = position.occupancy_all();
 
     for (Color color : {White, Black}) {
@@ -330,7 +409,8 @@ int CoreEvalNet::evaluate(const Position& position) const {
 
                 const Bitboard piece_map =
                     piece_attacks(type, square, color, occupied);
-                attack_map[color] |= piece_map;
+                attack_maps[color] |= piece_map;
+                attacks_by_type[color][type] |= piece_map;
                 Bitboard mobility_map = piece_map & ~own;
                 if (type == Knight || type == Bishop) {
                     mobility_map &= ~pawn_attacks[opposite(color)];
@@ -364,6 +444,7 @@ int CoreEvalNet::evaluate(const Position& position) const {
     }
 
     phase = std::min(phase, MaxPhase);
+    apply_threat_evaluation(position, attack_maps, attacks_by_type, mg, eg);
 
     for (Color color : {White, Black}) {
         const int sign = color == White ? 1 : -1;
@@ -432,8 +513,8 @@ int CoreEvalNet::evaluate(const Position& position) const {
         }
     }
 
-    mg += king_safety(position, White, pawn_files, attack_map);
-    mg -= king_safety(position, Black, pawn_files, attack_map);
+    mg += king_safety(position, White, pawn_files, attack_maps);
+    mg -= king_safety(position, Black, pawn_files, attack_maps);
 
     // Conversion guidance in low-material positions: bring the winning king
     // closer and drive the losing king away from the centre.
