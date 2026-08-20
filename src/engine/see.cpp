@@ -23,16 +23,6 @@ using PieceBitboards = std::array<Bitboard, PieceSlotCount>;
     return index < PieceSlotCount ? index : 0;
 }
 
-[[nodiscard]] Bitboard colour_pieces(const PieceBitboards& pieces,
-                                     Color color) {
-    Bitboard result = 0;
-    for (int type = Pawn; type <= King; ++type) {
-        result |= pieces[piece_index(
-            make_piece(color, static_cast<PieceType>(type)))];
-    }
-    return result;
-}
-
 struct LeastValuableAttacker {
     Piece piece = Empty;
     int square = NoSquare;
@@ -68,9 +58,10 @@ struct LeastValuableAttacker {
 
 [[nodiscard]] LeastValuableAttacker least_valuable_attacker(
     Bitboard attackers, Bitboard occupied, PieceBitboards& pieces,
+    const std::array<Bitboard, 2>& remaining_by_color,
     const std::array<int, 2>& king_squares, Color color, int target) {
     const int king = king_squares[color];
-    const Bitboard enemy = colour_pieces(pieces, opposite(color));
+    const Bitboard enemy = remaining_by_color[opposite(color)];
     if (king == NoSquare) return {};
     const bool in_discovered_check =
         (attacks::attackers_to(king, occupied, pieces) & enemy) != 0;
@@ -169,10 +160,14 @@ int static_exchange_eval(const Position& position, const Move& move) {
     }
 
     Bitboard occupied = position.occupancy_all();
+    std::array<Bitboard, 2> remaining_by_color = {
+        position.occupancy(White), position.occupancy(Black)};
     pieces[piece_index(moving)] &= ~bit(move.from);
+    remaining_by_color[us] &= ~bit(move.from);
     occupied &= ~bit(move.from);
     if (captured != Empty && attacks::on_board(captured_square)) {
         pieces[piece_index(captured)] &= ~bit(captured_square);
+        remaining_by_color[them] &= ~bit(captured_square);
         occupied &= ~bit(captured_square);
     }
     occupied |= bit(move.to);
@@ -187,7 +182,7 @@ int static_exchange_eval(const Position& position, const Move& move) {
     // illegal king captures here so they cannot distort capture ordering or
     // tactical pruning.
     const int own_king = king_squares[us];
-    const Bitboard enemy_after = colour_pieces(pieces, them);
+    const Bitboard enemy_after = remaining_by_color[them];
     if (own_king == NoSquare ||
         (attacks::attackers_to(own_king, occupied, pieces) & enemy_after) != 0) {
         return -piece_value(King);
@@ -203,10 +198,11 @@ int static_exchange_eval(const Position& position, const Move& move) {
     int depth = 0;
     while (depth + 1 < static_cast<int>(gains.size())) {
         const Bitboard attackers = attacks::attackers_to(move.to, occupied, pieces) &
-                                   colour_pieces(pieces, side);
+                                   remaining_by_color[side];
         const LeastValuableAttacker attacker =
             least_valuable_attacker(attackers, occupied, pieces,
-                                    king_squares, side, move.to);
+                                    remaining_by_color, king_squares, side,
+                                    move.to);
         if (!is_board_piece(attacker.piece) || attacker.square < 0 ||
             attacker.square >= 64) {
             break;
@@ -214,6 +210,7 @@ int static_exchange_eval(const Position& position, const Move& move) {
 
         const PieceType attacker_type = piece_type(attacker.piece);
         pieces[piece_index(attacker.piece)] &= ~bit(attacker.square);
+        remaining_by_color[side] &= ~bit(attacker.square);
         occupied &= ~bit(attacker.square);
         if (attacker_type == King) king_squares[side] = move.to;
 
