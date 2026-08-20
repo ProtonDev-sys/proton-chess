@@ -124,6 +124,34 @@ class CompareEnginesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing HumanSeed"):
             compare_engines.validate_profiles(both_missing_seed, missing_seed)
 
+    def test_parser_accepts_fixed_node_match_control(self) -> None:
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "compare_engines.py",
+                "candidate",
+                "baseline",
+                "--nodes",
+                "4096",
+                "--json",
+                "report.json",
+            ],
+        ):
+            args = compare_engines.parse_args()
+        self.assertEqual(args.nodes, 4096)
+        self.assertIsNone(args.move_time)
+        self.assertIsNone(args.base_seconds)
+        control = compare_engines.build_match_time_control(args)
+        self.assertEqual(control.limit(None).nodes, 4096)
+        self.assertEqual(control.watchdog(chess.WHITE, None), 2.0)
+        self.assertEqual(control.payload()["mode"], "fixed_nodes")
+        self.assertEqual(control.payload()["nodes_per_move"], 4096)
+
+        args.nodes = 0
+        with self.assertRaisesRegex(ValueError, "nodes must be positive"):
+            compare_engines.build_match_time_control(args)
+
     def test_engine_seed_is_stable_and_domain_separated(self) -> None:
         base = compare_engines.derive_engine_seed(17, 1, "white")
         self.assertEqual(base, compare_engines.derive_engine_seed(17, 1, "white"))

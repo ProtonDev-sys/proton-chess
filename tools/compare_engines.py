@@ -62,6 +62,46 @@ class EngineProfile:
     supported_options: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class FixedNodeTimeControl:
+    nodes_per_move: int
+    watchdog_grace_seconds: float
+    base_seconds: None = None
+    increment_seconds: float = 0.0
+
+    def limit(self, clocks: dict[chess.Color, float] | None) -> chess.engine.Limit:
+        del clocks
+        return chess.engine.Limit(nodes=self.nodes_per_move)
+
+    def watchdog(
+        self, side: chess.Color, clocks: dict[chess.Color, float] | None
+    ) -> float:
+        del side, clocks
+        return max(0.001, self.watchdog_grace_seconds)
+
+    def payload(self) -> dict[str, float | int | str | None]:
+        return {
+            "mode": "fixed_nodes",
+            "nodes_per_move": self.nodes_per_move,
+            "move_time_seconds": None,
+            "base_seconds": None,
+            "increment_seconds": 0.0,
+            "watchdog_grace_seconds": self.watchdog_grace_seconds,
+        }
+
+
+MatchTimeControl = estimate_elo.TimeControl | FixedNodeTimeControl
+
+
+def build_match_time_control(args: argparse.Namespace) -> MatchTimeControl:
+    nodes_per_move = getattr(args, "nodes", None)
+    if nodes_per_move is None:
+        return estimate_elo.build_time_control(args)
+    if nodes_per_move <= 0:
+        raise ValueError("nodes must be positive")
+    return FixedNodeTimeControl(nodes_per_move, args.watchdog_grace)
+
+
 @dataclass
 class AbGameRecord:
     pair: int
@@ -113,7 +153,7 @@ class AbReport:
     exact_alpha: float
     max_plies: int
     hash_mb: int
-    time_control: dict[str, float | str | None]
+    time_control: dict[str, float | int | str | None]
     candidate: LabeledEngineArtifact
     baseline: LabeledEngineArtifact
     candidate_options: dict[str, Any]
@@ -150,6 +190,8 @@ def parse_args() -> argparse.Namespace:
                         help="fixed seconds per move (default: 0.05)")
     timing.add_argument("--base-seconds", type=float,
                         help="Fischer starting clock in seconds")
+    timing.add_argument("--nodes", type=int,
+                        help="fixed Proton nodes per move for deterministic A/B screens")
     parser.add_argument("--increment", type=float, default=0.0,
                         help="Fischer increment in seconds")
     parser.add_argument("--watchdog-grace", type=float, default=2.0,
@@ -367,7 +409,7 @@ def run_match(
     supported_options: tuple[str, ...],
     openings: list[estimate_elo.OpeningPosition],
     args: argparse.Namespace,
-    time_control: estimate_elo.TimeControl,
+    time_control: MatchTimeControl,
     checkpoint: Callable[[AbResult], None] | None = None,
 ) -> AbResult:
     games = args.games + args.games % 2
@@ -473,7 +515,7 @@ def main() -> int:
     if not 0.0 < args.alpha < 1.0:
         raise ValueError("alpha must be between zero and one")
 
-    time_control = estimate_elo.build_time_control(args)
+    time_control = build_match_time_control(args)
     tool_path = Path(__file__).resolve()
     core_path = Path(estimate_elo.__file__).resolve()
     json_path = args.json_path.resolve()
