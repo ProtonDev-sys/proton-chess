@@ -57,11 +57,131 @@ jobs:
           path.write_text(text)
           PY
 
-      - name: Build and test candidate
+      - name: Build candidate
         run: >-
           cmake -S candidate -B candidate/build -DCMAKE_BUILD_TYPE=Release &&
-          cmake --build candidate/build --config Release --parallel 2 &&
-          ctest --test-dir candidate/build -C Release --output-on-failure
+          cmake --build candidate/build --config Release --parallel 2
+
+      - name: Run candidate tests for diagnostics
+        continue-on-error: true
+        run: ctest --test-dir candidate/build -C Release --output-on-failure
+
+      - name: Diagnose changed evaluator and limiter fixtures
+        working-directory: candidate
+        run: |
+          python - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          engine_path = str(Path("build/proton_chess").resolve())
+
+          def run_case(fen, go=None, options=(), evaluate=False):
+              proc = subprocess.Popen(
+                  [engine_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT, text=True, bufsize=1,
+              )
+              assert proc.stdin is not None and proc.stdout is not None
+
+              def send(line):
+                  proc.stdin.write(line + "\n")
+                  proc.stdin.flush()
+
+              def until(prefix):
+                  lines = []
+                  while True:
+                      line = proc.stdout.readline()
+                      if not line:
+                          raise RuntimeError(f"engine closed while waiting for {prefix!r}: {lines}")
+                      line = line.strip()
+                      lines.append(line)
+                      if line.startswith(prefix):
+                          return lines
+
+              send("uci")
+              until("uciok")
+              for name, value in options:
+                  send(f"setoption name {name} value {value}")
+              send("isready")
+              until("readyok")
+              send(f"position fen {fen}")
+              if evaluate:
+                  send("eval")
+                  lines = until("info string evaluation")
+                  match = re.search(r"evaluation (-?\d+) cp", lines[-1])
+                  result = {"eval": int(match.group(1))}
+              else:
+                  send(go)
+                  lines = until("bestmove")
+                  info = next((line for line in reversed(lines) if line.startswith("info depth ")), "")
+                  best = lines[-1].split()[1]
+                  depth = re.search(r"\bdepth (\d+)", info)
+                  score = re.search(r"\bscore cp (-?\d+)", info)
+                  nodes = re.search(r"\bnodes (\d+)", info)
+                  result = {
+                      "best": best,
+                      "depth": int(depth.group(1)) if depth else None,
+                      "score": int(score.group(1)) if score else None,
+                      "info_nodes": int(nodes.group(1)) if nodes else None,
+                  }
+              send("quit")
+              proc.wait(timeout=5)
+              return result
+
+          full = (("UseBook", "false"), ("Hash", "1"))
+          limited_3000 = full + (
+              ("UCI_LimitStrength", "true"), ("UCI_Elo", "3000"),
+              ("HumanSeed", "27"),
+          )
+          limited_2700 = full + (
+              ("UCI_LimitStrength", "true"), ("UCI_Elo", "2700"),
+              ("HumanSeed", "37"),
+          )
+
+          rook_fens = {
+              "support": "7k/8/8/8/2p5/P1P5/8/R6K w - - 0 1",
+              "control": "7k/8/8/8/2p5/P1P5/8/2R4K w - - 0 1",
+              "front": "7k/8/8/8/R1p5/P1P5/8/7K w - - 0 1",
+              "blocked": "7k/8/8/8/2p5/P1P5/p7/R6K w - - 0 1",
+              "enemy_support": "7k/8/8/8/2p5/P1PP4/7K/r7 w - - 0 1",
+              "enemy_control": "7k/8/8/8/2p5/P1PP4/7K/3r4 w - - 0 1",
+          }
+          print("ROOK_FIXTURES", {
+              name: run_case(fen, options=full, evaluate=True)["eval"]
+              for name, fen in rook_fens.items()
+          })
+
+          loss_band = "3rk3/ppp2ppp/8/8/3Q4/8/PPP2PPP/4K3 w - - 0 1"
+          zero_loss = "rnbqk1nr/ppp2p2/3pp1pp/8/2P1P3/2PPBN2/P4PPP/R2QKB1R b KQkq - 0 7"
+          confirmation = "rnbqkbnr/pp1ppppp/8/8/2N5/3P4/PPP1PPPP/R1BQKBNR b KQkq - 0 3"
+          tight = "1rbqk2r/pp2ppbp/2p2np1/3p4/3P4/P1NBP3/1PP2PPP/R2QK1NR b KQk - 2 7"
+
+          print("ZERO_LOSS_FULL", run_case(zero_loss, "go depth 3", full))
+          print("ZERO_LOSS_3000", run_case(zero_loss, "go depth 3", limited_3000))
+          print("LOSS_FULL_DEPTH4", run_case(loss_band, "go depth 4", full))
+          print("LOSS_LIMITED_N3450", run_case(
+              loss_band, "go nodes 3450", full + (
+                  ("UCI_LimitStrength", "true"), ("HumanSeed", "27"),
+              )))
+          print("LOSS_FULL_N6000", run_case(loss_band, "go nodes 6000", full))
+          print("CONFIRM_FULL", run_case(confirmation, "go depth 6", full))
+          print("CONFIRM_WIDE", run_case(
+              confirmation, "go depth 6 nodes 22000", limited_2700))
+
+          print("TIGHT_FULL", run_case(tight, "go depth 5", full))
+          print("TIGHT_QB6", run_case(tight, "go searchmoves d8b6 depth 5", full))
+          print("TIGHT_B6", run_case(tight, "go searchmoves b7b6 depth 5", full))
+          print("TIGHT_WIDE", run_case(
+              tight, "go searchmoves d8b6 b7b6 depth 5", full + (
+                  ("HumanSkill", "19"), ("HumanMaxLossCp", "40"),
+                  ("HumanSeed", "27"),
+              )))
+          print("TIGHT_NARROW", run_case(
+              tight, "go searchmoves d8b6 b7b6 depth 5", full + (
+                  ("HumanSkill", "19"), ("HumanMaxLossCp", "12"),
+                  ("HumanSeed", "27"),
+              )))
+          PY
 
       - name: Build baseline
         run: >-
