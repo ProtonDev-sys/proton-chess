@@ -36,6 +36,8 @@ int side_score(proton::Evaluator& evaluator, const std::string& fen,
     return evaluator.evaluate(position);
 }
 
+// Compare matched position deltas rather than absolute evaluator scores. This
+// keeps the tests stable when unrelated piece-square or tempo terms are tuned.
 void test_defended_piece_pressure() {
     proton::Evaluator evaluator;
 
