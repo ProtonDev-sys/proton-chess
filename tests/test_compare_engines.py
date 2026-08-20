@@ -142,8 +142,15 @@ class CompareEnginesTests(unittest.TestCase):
         self.assertEqual(args.nodes, 4096)
         self.assertIsNone(args.move_time)
         self.assertIsNone(args.base_seconds)
-        control = estimate_elo.build_time_control(args)
+        control = compare_engines.build_match_time_control(args)
+        self.assertEqual(control.limit(None).nodes, 4096)
+        self.assertEqual(control.watchdog(chess.WHITE, None), 2.0)
         self.assertEqual(control.payload()["mode"], "fixed_nodes")
+        self.assertEqual(control.payload()["nodes_per_move"], 4096)
+
+        args.nodes = 0
+        with self.assertRaisesRegex(ValueError, "nodes must be positive"):
+            compare_engines.build_match_time_control(args)
 
     def test_engine_seed_is_stable_and_domain_separated(self) -> None:
         base = compare_engines.derive_engine_seed(17, 1, "white")
