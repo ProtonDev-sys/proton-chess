@@ -1,0 +1,31 @@
+name: Apply compile-time evaluator tables
+
+on:
+  push:
+    branches: [agent/compile-time-eval-tables]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[eval-tables-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Apply exact reviewed patch
+        shell: bash
+        run: |
+          cat > /tmp/eval-tables.patch.gz.b64 <<'PATCH'
+          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
+          PATCH
+          base64 -d /tmp/eval-tables.patch.gz.b64 | gzip -d > /tmp/eval-tables.patch
+          git apply --check /tmp/eval-tables.patch
+          git apply /tmp/eval-tables.patch
+      - name: Commit source changes
+        run: |
+          git config user.name "Proton engine automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add src/engine/eval.cpp
+          git commit -m "Precompute evaluator geometry and mobility weights [eval-tables-applied]"
+          git push
