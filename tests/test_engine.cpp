@@ -267,6 +267,16 @@ void test_fen_and_ep_hashing() {
            "en-passant exposing the king is illegal");
     expect(pinned_ep.key() == pinned_no_ep.key(),
            "illegal en-passant right does not change the repetition key");
+
+    const std::string relevant_ep_fen = relevant_ep.fen();
+    const std::uint64_t relevant_ep_key = relevant_ep.key();
+    proton::UndoState ep_null_undo;
+    relevant_ep.make_null_move(ep_null_undo);
+    relevant_ep.unmake_null_move(ep_null_undo);
+    expect(relevant_ep.fen() == relevant_ep_fen &&
+               relevant_ep.key() == relevant_ep_key &&
+               !relevant_ep.parse_uci_move("d5e6").is_null(),
+           "null make/unmake restores a hash-relevant en-passant right");
 }
 
 void test_repetition_and_null_move() {
