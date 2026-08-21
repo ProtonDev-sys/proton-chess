@@ -1,0 +1,34 @@
+name: Apply late-move pruning strength candidate
+
+on:
+  push:
+    branches: [agent/lmp-strength-1]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[lmp-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Apply reviewed parameter change
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/engine/search.cpp")
+          text = path.read_text()
+          old = "const int lmp_limit = 3 + depth * depth + (improving ? 3 : 0);"
+          new = "const int lmp_limit = 1 + depth * depth + (improving ? 3 : 0);"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one LMP threshold, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit source change
+        run: |
+          git config user.name "Proton engine automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git add src/engine/search.cpp
+          git commit -m "Prune late quiet moves earlier at shallow depth [lmp-applied]"
+          git push
