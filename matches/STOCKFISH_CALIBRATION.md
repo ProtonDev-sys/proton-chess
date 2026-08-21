@@ -39,3 +39,21 @@ The record uses two explicit labels:
 - **Confidently dominates:** the confidently-beats condition is met and the observed score is at least 70%.
 
 Under that protocol, current Proton confidently beats Stockfish 18 at `UCI_Elo=1700`, confidently dominates it at `UCI_Elo=1500`, does not establish a confident win at 1800, and is far below unrestricted Stockfish 18. These are properties of the pinned fixed-node experiment, not portable absolute Elo claims.
+
+## Boundary extension
+
+`stockfish18_nodes1000_boundary_20260823.json` adds 2,800 games around the limited-strength boundary, using the same 1,000-node control, 200 unique color-swapped opening pairs, seed, opening suite, and pair-based confidence rule.
+
+The exact tested domination boundary is:
+
+| Stockfish 18 `UCI_Elo` | Proton W-D-L | Score | Conservative 95% score interval | Result |
+|---:|---:|---:|---:|---|
+| 1567 | 253-84-63 | 73.750% | 64.147%-83.353% | confidently dominates |
+| **1568** | **237-89-74** | **70.375%** | **60.772%-79.978%** | **confidently dominates** |
+| 1569 | 225-99-76 | 68.625% | 59.022%-78.228% | confidently beats, but does not meet the 70% domination threshold |
+| 1575 | 221-106-73 | 68.500% | 58.897%-78.103% | confidently beats, but does not dominate |
+| 1750 | 156-119-125 | 53.875% | 44.272%-63.478% | inconclusive |
+
+Therefore, `UCI_Elo=1568` is the highest tested integer Stockfish 18 setting that meets the repository's explicit **confidently dominates** definition. `UCI_Elo=1569` is the immediately adjacent tested setting and falls below the required 70% observed score. Proton still confidently beats the tested `UCI_Elo=1700` level, but levels 1701 through 1749 have not been exhaustively measured.
+
+Stockfish's limiter is nonlinear and contains internal skill-depth transitions, so nearby `UCI_Elo` values are not expected to form a perfectly smooth score curve. None of these labels is a portable absolute human Elo estimate.
