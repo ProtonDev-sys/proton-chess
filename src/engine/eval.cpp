@@ -125,17 +125,16 @@ static_assert((PassedPawnMasks[Black][55] & bit(54)) == 0);
 static_assert((ConnectedPawnMasks[8] & (bit(1) | bit(9) | bit(17))) ==
               (bit(1) | bit(9) | bit(17)));
 
-[[nodiscard]] Bitboard piece_attacks(PieceType type, int square, Color color,
+template<PieceType Type>
+[[nodiscard]] Bitboard piece_attacks(int square, Color color,
                                      Bitboard occupied) {
-    switch (type) {
-    case Pawn: return attacks::pawn(color, square);
-    case Knight: return attacks::Knight[square];
-    case Bishop: return attacks::bishop(square, occupied);
-    case Rook: return attacks::rook(square, occupied);
-    case Queen: return attacks::queen(square, occupied);
-    case King: return attacks::King[square];
-    default: return 0;
-    }
+    static_assert(Type >= Knight && Type <= King);
+    if constexpr (Type == Knight) return attacks::Knight[square];
+    if constexpr (Type == Bishop) return attacks::bishop(square, occupied);
+    if constexpr (Type == Rook) return attacks::rook(square, occupied);
+    if constexpr (Type == Queen) return attacks::queen(square, occupied);
+    if constexpr (Type == King) return attacks::King[square];
+    return attacks::pawn(color, square);
 }
 
 [[nodiscard]] int relative_rank(Color color, int square) {
@@ -398,43 +397,49 @@ int CoreEvalNet::evaluate(const Position& position) const {
     for (Color color : {White, Black}) {
         const int sign = color == White ? 1 : -1;
         const Bitboard own = position.occupancy(color);
-        for (int type_index = Knight; type_index <= King; ++type_index) {
-            const PieceType type = static_cast<PieceType>(type_index);
-            Bitboard remaining = position.pieces(make_piece(color, type));
+
+        const auto evaluate_type = [&]<PieceType Type>() {
+            Bitboard remaining = position.pieces(make_piece(color, Type));
             while (remaining != 0) {
                 const int square = static_cast<int>(std::countr_zero(remaining));
                 remaining &= remaining - 1;
-                mg += sign * MgValue[type];
-                eg += sign * EgValue[type];
-                phase += PhaseValue[type];
-                if (type != King) {
-                    if (color == White) white_material += EgValue[type];
-                    else black_material += EgValue[type];
+                mg += sign * MgValue[Type];
+                eg += sign * EgValue[Type];
+                phase += PhaseValue[Type];
+                if constexpr (Type != King) {
+                    if (color == White) white_material += EgValue[Type];
+                    else black_material += EgValue[Type];
                 }
 
-                if (type == Bishop) ++bishops[color];
-                int mg_square = PieceSquareScores[color][type][square].mg;
-                int eg_square = PieceSquareScores[color][type][square].eg;
+                if constexpr (Type == Bishop) ++bishops[color];
+                int mg_square = PieceSquareScores[color][Type][square].mg;
+                int eg_square = PieceSquareScores[color][Type][square].eg;
 
                 const Bitboard piece_map =
-                    piece_attacks(type, square, color, occupied);
+                    piece_attacks<Type>(square, color, occupied);
                 attack_maps[color] |= piece_map;
-                if (type <= Rook) {
-                    attacks_by_type[color][static_cast<std::size_t>(type)] |=
+                if constexpr (Type <= Rook) {
+                    attacks_by_type[color][static_cast<std::size_t>(Type)] |=
                         piece_map;
                 }
                 Bitboard mobility_map = piece_map & ~own;
-                if (type == Knight || type == Bishop) {
+                if constexpr (Type == Knight || Type == Bishop) {
                     mobility_map &= ~pawn_attacks[opposite(color)];
                 }
                 const int mobility = std::popcount(mobility_map);
-                mg_square += mobility * MobilityMg[type];
-                eg_square += mobility * MobilityEg[type];
+                mg_square += mobility * MobilityMg[Type];
+                eg_square += mobility * MobilityEg[Type];
 
                 mg += sign * mg_square;
                 eg += sign * eg_square;
             }
-        }
+        };
+
+        evaluate_type.template operator()<Knight>();
+        evaluate_type.template operator()<Bishop>();
+        evaluate_type.template operator()<Rook>();
+        evaluate_type.template operator()<Queen>();
+        evaluate_type.template operator()<King>();
     }
 
     phase = std::min(phase, MaxPhase);
