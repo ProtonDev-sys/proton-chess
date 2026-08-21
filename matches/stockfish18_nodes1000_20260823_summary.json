@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "name": "proton-vs-stockfish18-fixed-nodes-1000-20260823",
+  "status": "complete",
+  "completed_utc": "2026-08-21T01:13:58+00:00",
+  "protocol": {
+    "node_budget_per_move": 1000,
+    "hash_mb": 16,
+    "max_plies": 200,
+    "seed": 20260823,
+    "pairing": "same opening twice with Proton colors swapped",
+    "statistical_unit": "one color-swapped opening pair",
+    "confidence_method": "two-sided 95% Hoeffding interval over opening-pair scores",
+    "limited_level_games": 400,
+    "full_strength_screen_games": 100
+  },
+  "proton": {
+    "name": "Proton Chess",
+    "source_commit": "489b28d1213b043705817daba7b20143b41dbf96",
+    "binary_sha256": "ecd99725d5ec96811e0cb5671a8f743afda23c15ed33b04618c27fa0925e661f",
+    "options": {
+      "Hash": 16,
+      "UseBook": false,
+      "HumanStyle": false,
+      "UCI_LimitStrength": false
+    }
+  },
+  "stockfish": {
+    "name": "Stockfish 18",
+    "source_ref": "sf_18",
+    "binary_sha256": "3bcf4c8e90b6014d9f9bbecafd5b0540f8c8e18244b7c8b2a83ba272177d9c3b",
+    "threads": 1,
+    "advertised_uci_elo_range": {
+      "minimum": 1320,
+      "maximum": 3190,
+      "default": 1320
+    }
+  },
+  "openings": {
+    "path": "openings/uho_lichess_4852_v1_200.epd",
+    "sha256": "4d94a44a0a3c8d687b145a4efd594acaa0ab8c904873784c662beafb50055b6d",
+    "unique_opening_pairs_per_limited_level": 200
+  },
+  "tools": {
+    "shard_runner": {
+      "path": "tools/calibrate_stockfish.py",
+      "sha256": "f9dff8854e2ddc36d3cd6fbb1e976d83d832dd1adfc074d0f0ad6ec868c06fc8"
+    },
+    "merge_runner": {
+      "path": "tools/merge_stockfish_calibrations.py",
+      "sha256": "e931d0ce1b0b13205e0131c69caaff47c5fa640d8805e40a6c4da700959f3f68"
+    },
+    "match_core": {
+      "path": "tools/estimate_elo.py",
+      "sha256": "df6d62cf76bc3588b77177555c6ddd1234008aff49a5a1976308476bea9e26ee"
+    }
+  },
+  "decision_rules": {
+    "confidently_beats": "all 400 games complete and the conservative 95% score lower bound is strictly above 0.5",
+    "confidently_dominates": "confidently_beats is true and the observed score is at least 0.70"
+  },
+  "results": [
+    {
+      "stockfish_mode": "limited",
+      "stockfish_uci_elo": 1500,
+      "games": 400,
+      "wins": 303,
+      "draws": 51,
+      "losses": 46,
+      "score": 0.82125,
+      "score_ci95_low": 0.725217720868008,
+      "score_ci95_high": 0.9172822791319921,
+      "confidently_beats": true,
+      "confidently_dominates": true,
+      "raw_merged_report_sha256": "8ea2dc621924d3d7ae851f3de64bb8af3bd34ee979da13a2501b1c02d68a1ff3"
+    },
+    {
+      "stockfish_mode": "limited",
+      "stockfish_uci_elo": 1600,
+      "games": 400,
+      "wins": 218,
+      "draws": 99,
+      "losses": 83,
+      "score": 0.66875,
+      "score_ci95_low": 0.5727177208680079,
+      "score_ci95_high": 0.764782279131992,
+      "confidently_beats": true,
+      "confidently_dominates": false,
+      "raw_merged_report_sha256": "fa024edd543d340b95128de26d6fe4518dcde3580eaa7e400a4e444e7f703b94"
+    },
+    {
+      "stockfish_mode": "limited",
+      "stockfish_uci_elo": 1700,
+      "games": 400,
+      "wins": 212,
+      "draws": 116,
+      "losses": 72,
+      "score": 0.675,
+      "score_ci95_low": 0.578967720868008,
+      "score_ci95_high": 0.7710322791319921,
+      "confidently_beats": true,
+      "confidently_dominates": false,
+      "raw_merged_report_sha256": "d94af46efdf8fcc50acd62cb6934ed365f1583291e539420471b7a3cc3df31ff"
+    },
+    {
+      "stockfish_mode": "limited",
+      "stockfish_uci_elo": 1800,
+      "games": 400,
+      "wins": 149,
+      "draws": 140,
+      "losses": 111,
+      "score": 0.5475,
+      "score_ci95_low": 0.4514677208680079,
+      "score_ci95_high": 0.6435322791319921,
+      "confidently_beats": false,
+      "confidently_dominates": false,
+      "raw_merged_report_sha256": "8047db52498f9d80a85e99ccbaae709e47f1b4bb181cf3a72cbcc2f6f42a40b5"
+    },
+    {
+      "stockfish_mode": "full_strength",
+      "stockfish_uci_elo": null,
+      "games": 100,
+      "wins": 1,
+      "draws": 16,
+      "losses": 83,
+      "score": 0.09,
+      "score_ci95_low": 0.0,
+      "score_ci95_high": 0.28206455826398413,
+      "confidently_beats": false,
+      "confidently_dominates": false,
+      "raw_shard_report_sha256": "e66ddd4c2f83d0f3692671d80b46114755238e46ff161212738c9ab669593d74"
+    }
+  ],
+  "conclusions": {
+    "highest_tested_stockfish_uci_elo_confidently_beaten": 1700,
+    "highest_tested_stockfish_uci_elo_confidently_dominated": 1500,
+    "first_tested_level_without_a_confident_win": 1800,
+    "full_strength_stockfish18": "Proton is not competitive at this protocol"
+  },
+  "limitations": [
+    "Stockfish UCI_Elo is a limiter setting, not a universal human or cross-engine Elo scale.",
+    "The results apply only to the pinned binaries, opening suite, fixed node budget, options, adjudication, and seed.",
+    "The full-strength result is a 100-game screen, not the repository's separate 400-game 60+0.6 certification protocol.",
+    "The raw reports are intentionally not committed because they contain every move and would add several megabytes; their SHA-256 digests are recorded above."
+  ]
+}
