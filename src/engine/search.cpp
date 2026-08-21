@@ -1059,7 +1059,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         bool prune = false;
         if (!pv_node && !in_check && !gives_check && best_score > -MateThreshold) {
             if (quiet) {
-                const int lmp_limit = 3 + depth * depth + (improving ? 3 : 0);
+                const int lmp_limit = 1 + depth * depth + (improving ? 3 : 0);
                 if (depth <= 4 && quiet_moves > lmp_limit) prune = true;
 
                 const int futility_margin = 80 + depth * (improving ? 70 : 95);
