@@ -1,0 +1,55 @@
+name: Strength architecture audit bundle
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out Proton
+        uses: actions/checkout@v7
+        with:
+          path: proton
+          persist-credentials: false
+
+      - name: Check out official Stockfish 18
+        uses: actions/checkout@v7
+        with:
+          repository: official-stockfish/Stockfish
+          ref: sf_18
+          path: stockfish
+          persist-credentials: false
+
+      - name: Build Proton release and tests
+        run: >-
+          cmake -S proton -B proton/build -DCMAKE_BUILD_TYPE=Release &&
+          cmake --build proton/build --config Release --parallel 2 &&
+          ctest --test-dir proton/build -C Release --output-on-failure
+
+      - name: Build Stockfish 18
+        run: make -C stockfish/src -j2 profile-build ARCH=x86-64
+
+      - name: Stage exact audit bundle
+        run: |
+          mkdir -p bundle/bin
+          cp proton/build/proton_chess bundle/bin/proton_chess
+          cp stockfish/src/stockfish bundle/bin/stockfish18
+          cp -a proton/. bundle/proton
+          rm -rf bundle/proton/.git bundle/proton/build
+          printf '%s\n' '${{ github.event.pull_request.head.sha }}' > bundle/PROTON_COMMIT
+          printf '%s\n' 'sf_18' > bundle/STOCKFISH_REF
+          sha256sum bundle/bin/proton_chess bundle/bin/stockfish18 > bundle/SHA256SUMS
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: proton-strength-audit-${{ github.event.pull_request.head.sha }}
+          path: bundle
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 2
