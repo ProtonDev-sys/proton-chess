@@ -74,6 +74,11 @@ if(PROTON_BUILD_TESTS)
     target_link_libraries(proton-threat-eval-tests PRIVATE proton_engine)
     add_test(NAME proton-threat-eval-tests COMMAND proton-threat-eval-tests)
 
+    add_executable(proton-attack-tests tests/test_attacks.cpp)
+    target_link_libraries(proton-attack-tests PRIVATE proton_engine)
+    add_test(NAME proton-attack-tests COMMAND proton-attack-tests)
+    set_tests_properties(proton-attack-tests PROPERTIES TIMEOUT 60)
+
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME proton-uci-smoke
