@@ -6,8 +6,6 @@
 *.so
 *.dll
 *.exe
-!watch_stockfish.bat
-!play_proton.bat
 
 # Python cache
 __pycache__/
@@ -22,6 +20,7 @@ __pycache__/
 # Local engine downloads and third-party checkouts
 /external/
 /openings/data/
+/results/
 *.zip
 *.zst
 

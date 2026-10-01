@@ -225,6 +225,14 @@ int CoreEvalNet::evaluate(const Position& position) const {
     const auto& pawn_files = pawn.files;
     const auto& pawn_attacks = pawn.attacks;
     std::array<Bitboard, 2> attack_map = pawn_attacks;
+    std::array<int, 2> king_attackers{};
+    std::array<int, 2> king_attack_weight{};
+    std::array<Bitboard, 2> king_rings{};
+    for (Color color : {White, Black}) {
+        const int king = position.king_square(color);
+        if (king != NoSquare) king_rings[color] = attacks::King[king] | bit(king);
+    }
+    constexpr std::array<int, 6> AttackWeight = {0, 2, 2, 3, 5, 0};
 
     for (Color color : {White, Black}) {
         const int sign = color == White ? 1 : -1;
@@ -276,7 +284,15 @@ int CoreEvalNet::evaluate(const Position& position) const {
 
                 const Bitboard piece_map = piece_attacks(position, type, square, color);
                 attack_map[color] |= piece_map;
-                const int mobility = std::popcount(piece_map & ~own);
+                const int mobility = std::popcount(piece_map & ~own &
+                                                  ~pawn_attacks[opposite(color)]);
+                if (type != King) {
+                    const int ring_hits = std::popcount(piece_map & king_rings[opposite(color)]);
+                    if (ring_hits != 0) {
+                        ++king_attackers[color];
+                        king_attack_weight[color] += AttackWeight[type] * std::min(4, ring_hits);
+                    }
+                }
                 switch (type) {
                 case Knight:
                     mg_square += mobility * 4;
@@ -318,9 +334,27 @@ int CoreEvalNet::evaluate(const Position& position) const {
             const int square = static_cast<int>(std::countr_zero(passers));
             passers &= passers - 1;
             const int front = square + (color == White ? 8 : -8);
+            const int rr = relative_rank(color, square);
             if (attacks::on_board(front) && position.piece_at(front) != Empty) {
                 mg -= sign * 7;
-                eg -= sign * 12;
+                eg -= sign * (12 + rr * rr);
+            } else if (attacks::on_board(front)) {
+                const Bitboard path = attacks::Rays[color == White ? 0 : 1][square];
+                if ((path & position.occupancy_all()) == 0) {
+                    eg += sign * rr * rr * 2;
+                    if ((path & attack_map[opposite(color)]) == 0) {
+                        eg += sign * rr * rr;
+                    }
+                }
+                const int own_king = position.king_square(color);
+                const int enemy_king = position.king_square(opposite(color));
+                if (own_king != NoSquare && enemy_king != NoSquare) {
+                    const int own_distance = std::max(std::abs(file_of(front) - file_of(own_king)),
+                                                      std::abs(rank_of(front) - rank_of(own_king)));
+                    const int enemy_distance = std::max(std::abs(file_of(front) - file_of(enemy_king)),
+                                                        std::abs(rank_of(front) - rank_of(enemy_king)));
+                    eg += sign * (enemy_distance - own_distance) * rr * 2;
+                }
             }
         }
 
@@ -357,6 +391,13 @@ int CoreEvalNet::evaluate(const Position& position) const {
 
     mg += king_safety(position, White, pawn_files, attack_map);
     mg -= king_safety(position, Black, pawn_files, attack_map);
+    for (Color color : {White, Black}) {
+        if (king_attackers[color] < 2) continue;
+        const int weight = king_attack_weight[color];
+        int danger = std::min(240, weight * weight / 4);
+        if (position.pieces(make_piece(color, Queen)) == 0) danger /= 2;
+        mg += color == White ? danger : -danger;
+    }
 
     // Conversion guidance in low-material positions: bring the winning king
     // closer and drive the losing king away from the centre.

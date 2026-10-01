@@ -77,8 +77,8 @@ void Search::new_game() {
     for (auto& piece : capture_history_) {
         for (auto& square : piece) square.fill(0);
     }
-    std::fill(continuation_history_.begin(), continuation_history_.end(), 0);
-    std::fill(continuation_history_2_.begin(), continuation_history_2_.end(), 0);
+    std::fill(continuation_history_.begin(), continuation_history_.end(), std::int16_t{0});
+    std::fill(continuation_history_2_.begin(), continuation_history_2_.end(), std::int16_t{0});
     for (auto& side : correction_history_) side.fill(0);
     evaluator_.clear_cache();
 }
@@ -159,6 +159,9 @@ void Search::store(std::uint64_t key, int depth, int score, int static_eval,
         return;
     }
 
+    if (replacement->key != signature || replacement->bound == Bound::None) {
+        replacement->move = Move::null();
+    }
     replacement->key = signature;
     replacement->score = static_cast<std::int16_t>(score_to_tt(clamp_score(score), ply));
     replacement->static_eval = static_eval == NoScore
@@ -704,7 +707,7 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
 
 int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int ply,
                        bool pv_node, bool cut_node, bool allow_null,
-                       const Move& previous_move) {
+                       const Move& previous_move, const Move& excluded_move) {
     if (ply >= MaxPly - 1) return evaluator_.evaluate(position);
     ++nodes_;
     selective_depth_ = std::max(selective_depth_, ply);
@@ -732,6 +735,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
     int tt_static_eval = NoScore;
     int tt_score = NoScore;
     Bound tt_bound = Bound::None;
+    int tt_depth = -1;
+    const bool excluded = !excluded_move.is_null();
     const bool rule50_sensitive = position.halfmove_clock() + depth >= 100;
     if (TTEntry* entry = probe(key)) {
         entry->generation = generation_;
@@ -739,7 +744,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
         tt_score = score_from_tt(entry->score, ply);
         tt_bound = entry->bound;
-        if (!rule50_sensitive && entry->depth >= depth) {
+        tt_depth = entry->depth;
+        if (!excluded && !rule50_sensitive && entry->depth >= depth) {
             if (entry->bound == Bound::Exact) return tt_score;
             if (!pv_node && entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
             if (!pv_node && entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
@@ -765,7 +771,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
     const bool improving = !in_check && ply >= 2 && eval_stack_[ply - 2] != NoScore &&
                            static_eval > eval_stack_[ply - 2];
 
-    if (!pv_node && !in_check && std::abs(beta) < MateThreshold) {
+    if (!excluded && !pv_node && !in_check && std::abs(beta) < MateThreshold) {
         // Razoring: a very low static score at shallow depth is unlikely to recover
         // without a tactical move, which quiescence will still examine.
         if (depth <= 2 && pruning_eval + 180 + depth * 110 <= alpha) {
@@ -780,7 +786,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         }
     }
 
-    if (allow_null && !pv_node && !in_check && depth >= 3 &&
+    if (!excluded && allow_null && !pv_node && !in_check && depth >= 3 &&
         pruning_eval >= beta && position.has_non_pawn_material(position.side_to_move()) &&
         std::abs(beta) < MateThreshold) {
         const int extra = std::clamp((pruning_eval - beta) / 180, 0, 3);
@@ -804,7 +810,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
     // ProbCut tests forcing captures against a raised beta before searching the
     // full move list. Requiring a non-losing exchange and a confirming reduced
     // search keeps the pruning conservative in tactically unstable positions.
-    if (!pv_node && !in_check && depth >= 6 && std::abs(beta) < MateThreshold) {
+    if (!excluded && !pv_node && !in_check && depth >= 6 && std::abs(beta) < MateThreshold) {
         constexpr int ProbCutMargin = 170;
         const int probcut_beta = std::min(MateThreshold - 1, beta + ProbCutMargin);
         std::vector<Move>& tactical = generated_moves_[ply];
@@ -847,7 +853,20 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
     }
 
     // Internal iterative reduction when the hash table has no useful move.
-    if (tt_move.is_null() && depth >= 6 && pv_node) --depth;
+    if (!excluded && tt_move.is_null() && depth >= 6 && pv_node) --depth;
+
+    Move singular_move = Move::null();
+    if (!excluded && !in_check && !rule50_sensitive && depth >= 8 && ply < depth * 2 &&
+        !tt_move.is_null() && tt_depth >= depth - 3 && std::abs(tt_score) < MateThreshold &&
+        (tt_bound == Bound::Lower || tt_bound == Bound::Exact)) {
+        const int singular_beta = tt_score - depth * 2;
+        const int alternative_score = alpha_beta(position, (depth - 1) / 2,
+                                                 singular_beta - 1, singular_beta, ply,
+                                                 false, cut_node, false, previous_move, tt_move);
+        if (should_stop()) return alpha;
+        if (alternative_score < singular_beta) singular_move = tt_move;
+        pv_length_[ply] = ply;
+    }
 
     std::vector<Move>& pseudo = generated_moves_[ply];
     position.generate_pseudo_moves(pseudo);
@@ -870,6 +889,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
             [](const ScoredMove& lhs, const ScoredMove& rhs) { return lhs.score < rhs.score; });
         std::iter_swap(ordered.begin() + static_cast<std::ptrdiff_t>(move_index), best_candidate);
         const Move move = ordered[move_index].move;
+        if (excluded && move == excluded_move) continue;
         const bool quiet = is_quiet(move);
         const int see = quiet ? 0 : ordered[move_index].see;
         const int history_score = quiet
@@ -886,7 +906,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         const bool gives_check = position.in_check(position.side_to_move());
 
         bool prune = false;
-        if (!pv_node && !in_check && !gives_check && best_score > -MateThreshold) {
+        if (!excluded && !pv_node && !in_check && !gives_check && best_score > -MateThreshold) {
             if (quiet) {
                 const int lmp_limit = 3 + depth * depth + (improving ? 3 : 0);
                 if (depth <= 4 && quiet_moves > lmp_limit) prune = true;
@@ -908,7 +928,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         // Check extension is applied once on entry to the checked node. Applying
         // another extension to the checking move here would preserve full depth
         // across every check/evasion pair and allow pathological king chases.
-        const int new_depth = depth - 1;
+        const int new_depth = depth - 1 + (move == singular_move && !gives_check ? 1 : 0);
         int score;
 
         if (legal_moves == 1) {
@@ -964,10 +984,10 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
                 } else if (move.is_capture()) {
                     update_capture_history(position, move, depth, tried_captures);
                 }
-                if (!rule50_sensitive) {
+                if (!excluded && !rule50_sensitive) {
                     store(key, depth, alpha, raw_static_eval, Bound::Lower, move, ply);
                 }
-                if (quiet) {
+                if (!excluded && quiet) {
                     update_correction_history(position, depth, raw_static_eval,
                                               alpha, Bound::Lower);
                 }
@@ -976,13 +996,16 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         }
     }
 
-    if (legal_moves == 0) return in_check ? -MateScore + ply : draw_score(position);
+    if (legal_moves == 0) {
+        if (excluded) return alpha;
+        return in_check ? -MateScore + ply : draw_score(position);
+    }
 
     const Bound bound = best_score > original_alpha ? Bound::Exact : Bound::Upper;
-    if (!rule50_sensitive) {
+    if (!excluded && !rule50_sensitive) {
         store(key, depth, best_score, raw_static_eval, bound, best_move, ply);
     }
-    if (best_move.is_null() || is_quiet(best_move)) {
+    if (!excluded && (best_move.is_null() || is_quiet(best_move))) {
         update_correction_history(position, depth, raw_static_eval, best_score, bound);
     }
     return best_score;

@@ -10,6 +10,62 @@
 #include "engine/search.h"
 #include "engine/see.h"
 
+namespace proton {
+
+struct SearchTestAccess {
+    static bool excluded_search_preserves_full_position_entry(Search& search, Position& position) {
+        search.new_game();
+        search.stop_requested_.store(false);
+        search.eval_stack_.fill(Search::NoScore);
+        const Move excluded = position.parse_uci_move("e2e4");
+        const auto key = position.key();
+        const auto fen = position.fen();
+        search.store(key, 8, 3000, 10, Search::Bound::Exact, excluded, 0);
+        const int score = search.alpha_beta(position, 3, -100, 100, 0,
+                                            false, false, false, Move::null(), excluded);
+        const auto* entry = search.probe(key);
+        return score != 3000 && search.nodes_ > 1 && position.fen() == fen &&
+               entry != nullptr && entry->score == 3000 && entry->depth == 8 &&
+               entry->bound == Search::Bound::Exact && entry->move == excluded;
+    }
+
+    static bool excluded_only_move_is_not_stalemate(Search& search, Position& position) {
+        search.new_game();
+        search.stop_requested_.store(false);
+        std::vector<Move> moves;
+        position.generate_legal_moves(moves);
+        if (moves.size() != 1 || position.in_check(position.side_to_move())) return false;
+        const auto key = position.key();
+        const auto fen = position.fen();
+        const int score = search.alpha_beta(position, 3, 100, 101, 0,
+                                            false, false, false, Move::null(), moves.front());
+        return score == 100 && position.fen() == fen && search.probe(key) == nullptr;
+    }
+
+    static bool replacement_moves_are_position_local(Search& search) {
+        search.stop_requested_.store(false);
+        auto& bucket = search.table_[1 & search.table_mask_];
+        const Move remembered = Move{8, 16, NoPieceType, MoveQuiet};
+        for (std::size_t index = 0; index < bucket.entries.size(); ++index) {
+            auto& entry = bucket.entries[index];
+            entry.key = Search::tt_signature((static_cast<std::uint64_t>(index + 1) << 32U) | 1ULL);
+            entry.bound = Search::Bound::Lower;
+            entry.depth = static_cast<std::int8_t>(index);
+            entry.generation = search.generation_;
+            entry.move = remembered;
+        }
+        constexpr std::uint64_t NewKey = (99ULL << 32U) | 1ULL;
+        search.store(NewKey, 0, 10, 5, Search::Bound::Lower, Move::null(), 0);
+        const auto* replacement = search.probe(NewKey);
+        if (replacement == nullptr || !replacement->move.is_null()) return false;
+        search.store(NewKey, 0, 10, 5, Search::Bound::Lower, remembered, 0);
+        search.store(NewKey, 0, 10, 5, Search::Bound::Lower, Move::null(), 0);
+        return search.probe(NewKey)->move == remembered;
+    }
+};
+
+}
+
 namespace {
 
 int failures = 0;
@@ -295,6 +351,15 @@ void test_search_tactics() {
     proton::Search search(evaluator);
     search.set_options(options);
 
+    proton::Position excluded_start;
+    expect(proton::SearchTestAccess::excluded_search_preserves_full_position_entry(search, excluded_start),
+           "singular verification ignores TT cutoffs and preserves the full-position entry");
+    proton::Position one_move;
+    expect(one_move.set_fen("8/8/8/8/8/1r6/2k5/K7 w - - 0 1"), "single legal move FEN");
+    expect(proton::SearchTestAccess::excluded_only_move_is_not_stalemate(search, one_move),
+           "excluding the only legal move fails low without inventing stalemate");
+    search.new_game();
+
     proton::Position mate;
     expect(mate.set_fen("7k/5Q2/6K1/8/8/8/8/8 w - - 99 1"), "mate-in-one FEN");
     proton::SearchLimits limits;
@@ -357,6 +422,58 @@ void test_search_tactics() {
            "quiescence scores stalemate as a draw, not static material");
 }
 
+void test_evaluation_symmetry_and_passers() {
+    proton::CoreEvalNet evaluator;
+    proton::Position position;
+    std::mt19937 random(20261001);
+    for (int sample = 0; sample < 64; ++sample) {
+        std::string mirrored_fen;
+        for (int rank = 7; rank >= 0; --rank) {
+            int empty = 0;
+            for (int file = 0; file < 8; ++file) {
+                const auto piece = position.piece_at((rank * 8 + file) ^ 56);
+                if (piece == proton::Empty) {
+                    ++empty;
+                    continue;
+                }
+                if (empty != 0) mirrored_fen += std::to_string(std::exchange(empty, 0));
+                mirrored_fen += proton::piece_to_char(proton::make_piece(
+                    proton::opposite(proton::piece_color(piece)), proton::piece_type(piece)));
+            }
+            if (empty != 0) mirrored_fen += std::to_string(empty);
+            if (rank != 0) mirrored_fen += '/';
+        }
+        mirrored_fen += position.side_to_move() == proton::White ? " b - - 0 1" : " w - - 0 1";
+        proton::Position mirrored;
+        expect(mirrored.set_fen(mirrored_fen), "color-reflected evaluation FEN");
+        expect(evaluator.evaluate(position) == evaluator.evaluate(mirrored),
+               "evaluation is invariant under color and rank reflection");
+        std::vector<proton::Move> moves;
+        position.generate_legal_moves(moves);
+        if (moves.empty()) break;
+        proton::UndoState undo;
+        expect(position.make_move(moves[random() % moves.size()], undo), "evaluation sample move");
+    }
+
+    proton::Position supported;
+    proton::Position distant;
+    expect(supported.set_fen("7k/8/3P4/8/8/2K5/8/8 w - - 0 1"), "supported passer FEN");
+    expect(distant.set_fen("7k/8/3P4/8/8/8/8/K7 w - - 0 1"), "distant king FEN");
+    expect(evaluator.evaluate(supported) > evaluator.evaluate(distant),
+           "endgame king supports passed-pawn conversion");
+
+    proton::Evaluator cached;
+    expect(cached.evaluate(supported) == cached.evaluate(supported), "evaluation cache repeat");
+    expect(cached.evaluate(supported) == evaluator.evaluate(supported), "cached and uncached evaluation agree");
+}
+
+void test_transposition_replacement() {
+    proton::Evaluator evaluator;
+    proton::Search search(evaluator);
+    expect(proton::SearchTestAccess::replacement_moves_are_position_local(search),
+           "hash replacement clears unrelated moves but preserves same-position moves");
+}
+
 }  // namespace
 
 int main() {
@@ -381,6 +498,8 @@ int main() {
     test_attack_tables();
     test_static_exchange();
     test_search_tactics();
+    test_evaluation_symmetry_and_passers();
+    test_transposition_replacement();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

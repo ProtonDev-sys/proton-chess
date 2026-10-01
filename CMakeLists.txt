@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(proton_chess VERSION 0.2.0 LANGUAGES CXX)
+project(proton_chess VERSION 0.3.0 LANGUAGES CXX)
 
 option(PROTON_NATIVE "Tune release builds for the current CPU" OFF)
 option(PROTON_LTO "Enable link-time optimisation when supported" ON)
@@ -20,6 +20,7 @@ add_library(proton_engine
     src/engine/uci.cpp
 )
 target_include_directories(proton_engine PUBLIC src)
+target_compile_definitions(proton_engine PRIVATE PROTON_VERSION="${PROJECT_VERSION}")
 target_link_libraries(proton_engine PUBLIC Threads::Threads)
 
 if(MSVC)
@@ -72,5 +73,16 @@ if(PROTON_BUILD_TESTS)
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/uci_smoke.py
                          $<TARGET_FILE:proton_chess>)
         set_tests_properties(proton-uci-smoke PROPERTIES TIMEOUT 20)
+        execute_process(COMMAND ${Python3_EXECUTABLE} -c "import chess"
+                        RESULT_VARIABLE PROTON_PYTHON_CHESS_STATUS
+                        OUTPUT_QUIET ERROR_QUIET)
+        if(PROTON_PYTHON_CHESS_STATUS EQUAL 0)
+            add_test(NAME proton-match-tools
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_match_tools.py)
+            add_test(NAME proton-differential-perft
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential_perft.py
+                             $<TARGET_FILE:proton_chess>)
+            set_tests_properties(proton-differential-perft PROPERTIES TIMEOUT 30)
+        endif()
     endif()
 endif()

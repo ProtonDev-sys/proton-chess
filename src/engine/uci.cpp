@@ -312,7 +312,7 @@ void UciLoop::handle_go(const std::string& line) {
 
 void UciLoop::handle_command(const std::string& line, bool& quit) {
     if (line == "uci") {
-        print_line("id name Proton Chess");
+        print_line("id name Proton Chess " PROTON_VERSION);
         print_line("id author ProtonDev-sys");
         print_line("option name Hash type spin default 64 min 1 max 4096");
         print_line("option name Threads type spin default 1 min 1 max 1");

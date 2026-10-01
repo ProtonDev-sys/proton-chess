@@ -70,6 +70,8 @@ public:
     [[nodiscard]] static constexpr int mate_threshold() { return 31800; }
 
 private:
+    friend struct SearchTestAccess;
+
     static constexpr int MaxPly = 128;
     static constexpr int Infinity = 32767;
     static constexpr int MateScore = 32000;
@@ -185,7 +187,7 @@ private:
 
     int alpha_beta(Position& position, int depth, int alpha, int beta, int ply,
                    bool pv_node, bool cut_node, bool allow_null,
-                   const Move& previous_move);
+                   const Move& previous_move, const Move& excluded_move = Move::null());
     int quiescence(Position& position, int alpha, int beta, int ply);
     int search_root(Position& position, std::vector<RootMove>& root_moves,
                     int depth, int alpha, int beta);
