@@ -1,0 +1,579 @@
+{
+  "date": "2026-10-01",
+  "source_commit": "0034f0b",
+  "baseline_commit": "282f012",
+  "hardware": "AMD Ryzen 7 9800X3D, 8 cores / 16 logical processors",
+  "candidate_build": "Windows MSVC 19.44, Release, LTO, PROTON_NATIVE=ON (AVX2)",
+  "stockfish_build": "Official sf_19 universal Windows release; compiler command selects x86-64-avx512icl on this CPU",
+  "stockfish_release": {
+    "tag": "sf_19",
+    "published_at": "2026-09-05T08:33:17Z",
+    "release_url": "https://github.com/official-stockfish/Stockfish/releases/tag/sf_19",
+    "asset": "stockfish-windows-x86-64-universal.zip",
+    "archive_digest": "sha256:3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7",
+    "binary": "D:\\Development\\Proton Chess\\external\\sf_19\\stockfish-windows-x86-64-universal.exe",
+    "binary_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+  },
+  "validation": {
+    "portable_ctest": "4/4 passed",
+    "native_ctest": "4/4 passed",
+    "differential_perft": [
+      {
+        "positions": 1000,
+        "depth": 2,
+        "seed": 20261001
+      },
+      {
+        "positions": 128,
+        "depth": 3,
+        "seed": 20261002
+      }
+    ],
+    "replayed_pgn_games": 1460
+  },
+  "experiments": [
+    {
+      "name": "baseline-fair",
+      "phase": "screening",
+      "candidate": {
+        "name": "Proton Chess",
+        "sha256": "895fafe3f20f6178bf5b4b9ef74a7d9d1e05fd947c53dfd48ac9e941a841325f"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 80,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261001,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 80,
+          "pairs": 40,
+          "wins": 48,
+          "draws": 12,
+          "losses": 20,
+          "unresolved": 0,
+          "completed_score": 0.675,
+          "pessimistic_score": 0.675,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.4814886219897526,
+          "score_upper_one_sided": 0.8685113780102475,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/baseline-fair.json"
+    },
+    {
+      "name": "eval-a-v-baseline",
+      "phase": "screening",
+      "candidate": {
+        "name": "Proton Chess",
+        "sha256": "15e1a3356f2fe63034636054060c9dc0e8b8633efff81fc12ae74d9d47064fa7"
+      },
+      "opponent": {
+        "name": "Proton Chess",
+        "sha256": "895fafe3f20f6178bf5b4b9ef74a7d9d1e05fd947c53dfd48ac9e941a841325f"
+      },
+      "settings": {
+        "games": 80,
+        "move_time": 0.06,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261001,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 80,
+          "pairs": 40,
+          "wins": 28,
+          "draws": 26,
+          "losses": 26,
+          "unresolved": 0,
+          "completed_score": 0.5125,
+          "pessimistic_score": 0.5125,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.31898862198975253,
+          "score_upper_one_sided": 0.7060113780102474,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/eval-a-v-baseline.json"
+    },
+    {
+      "name": "eval-a-2200",
+      "phase": "screening",
+      "candidate": {
+        "name": "Proton Chess",
+        "sha256": "15e1a3356f2fe63034636054060c9dc0e8b8633efff81fc12ae74d9d47064fa7"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 80,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261002,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 80,
+          "pairs": 40,
+          "wins": 54,
+          "draws": 17,
+          "losses": 9,
+          "unresolved": 0,
+          "completed_score": 0.78125,
+          "pessimistic_score": 0.78125,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.5877386219897526,
+          "score_upper_one_sided": 0.9747613780102474,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "full_evidence": "results/2026-10-01/eval-a-2200.json"
+    },
+    {
+      "name": "eval-b-v-a",
+      "phase": "screening",
+      "candidate": {
+        "name": "Proton Chess",
+        "sha256": "bd9dbcc9c4f2931cdc3584e868c0a9c1e20ef7d4bad861f660fda025c6a3d29c"
+      },
+      "opponent": {
+        "name": "Proton Chess",
+        "sha256": "15e1a3356f2fe63034636054060c9dc0e8b8633efff81fc12ae74d9d47064fa7"
+      },
+      "settings": {
+        "games": 80,
+        "move_time": 0.06,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261001,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 80,
+          "pairs": 40,
+          "wins": 34,
+          "draws": 21,
+          "losses": 25,
+          "unresolved": 0,
+          "completed_score": 0.55625,
+          "pessimistic_score": 0.55625,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.3627386219897526,
+          "score_upper_one_sided": 0.7497613780102474,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/eval-b-v-a.json"
+    },
+    {
+      "name": "eval-b-2200",
+      "phase": "screening",
+      "candidate": {
+        "name": "Proton Chess",
+        "sha256": "bd9dbcc9c4f2931cdc3584e868c0a9c1e20ef7d4bad861f660fda025c6a3d29c"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 80,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261002,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 80,
+          "pairs": 40,
+          "wins": 51,
+          "draws": 15,
+          "losses": 14,
+          "unresolved": 0,
+          "completed_score": 0.73125,
+          "pessimistic_score": 0.73125,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.5377386219897525,
+          "score_upper_one_sided": 0.9247613780102474,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "full_evidence": "results/2026-10-01/eval-b-2200.json"
+    },
+    {
+      "name": "search-c-v-b",
+      "phase": "screening",
+      "candidate": {
+        "name": "Proton Chess",
+        "sha256": "424b0a645b92b9f77f1a56ea7b2bb94e46862ac13835d8129cb184dde484a945"
+      },
+      "opponent": {
+        "name": "Proton Chess",
+        "sha256": "bd9dbcc9c4f2931cdc3584e868c0a9c1e20ef7d4bad861f660fda025c6a3d29c"
+      },
+      "settings": {
+        "games": 100,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261003,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 100,
+          "pairs": 50,
+          "wins": 36,
+          "draws": 36,
+          "losses": 28,
+          "unresolved": 0,
+          "completed_score": 0.54,
+          "pessimistic_score": 0.54,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.36691816173977154,
+          "score_upper_one_sided": 0.7130818382602285,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/search-c-v-b.json"
+    },
+    {
+      "name": "confirm-2200-100ms",
+      "phase": "confirmation",
+      "candidate": {
+        "name": "Proton Chess 0.3.0",
+        "sha256": "1ea5e0c671ec977655282ad127a0b76ff664e45fc2ccb64a17a09555dde77463"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 400,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 6,
+        "seed": 22001001,
+        "confidence": 0.975,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 400,
+          "pairs": 200,
+          "wins": 254,
+          "draws": 77,
+          "losses": 69,
+          "unresolved": 0,
+          "completed_score": 0.73125,
+          "pessimistic_score": 0.73125,
+          "confidence": 0.975,
+          "score_lower_one_sided": 0.6352177208680079,
+          "score_upper_one_sided": 0.827282279131992,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "full_evidence": "results/2026-10-01/confirm-2200-100ms.json"
+    },
+    {
+      "name": "confirm-2200-250ms",
+      "phase": "confirmation",
+      "candidate": {
+        "name": "Proton Chess 0.3.0",
+        "sha256": "1ea5e0c671ec977655282ad127a0b76ff664e45fc2ccb64a17a09555dde77463"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 200,
+        "move_time": 0.25,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 22002501,
+        "confidence": 0.975,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 200,
+          "pairs": 100,
+          "wins": 150,
+          "draws": 20,
+          "losses": 30,
+          "unresolved": 0,
+          "completed_score": 0.8,
+          "pessimistic_score": 0.8,
+          "confidence": 0.975,
+          "score_lower_one_sided": 0.6641898484259381,
+          "score_upper_one_sided": 0.935810151574062,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "full_evidence": "results/2026-10-01/confirm-2200-250ms.json"
+    },
+    {
+      "name": "elo-ladder",
+      "phase": "exploratory",
+      "candidate": {
+        "name": "Proton Chess 0.3.0",
+        "sha256": "1ea5e0c671ec977655282ad127a0b76ff664e45fc2ccb64a17a09555dde77463"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 40,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261010,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 1600,
+          "games": 40,
+          "pairs": 20,
+          "wins": 39,
+          "draws": 1,
+          "losses": 0,
+          "unresolved": 0,
+          "completed_score": 0.9875,
+          "pessimistic_score": 0.9875,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.7138335847444014,
+          "score_upper_one_sided": 1.0,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        },
+        {
+          "opponent_elo": 2000,
+          "games": 40,
+          "pairs": 20,
+          "wins": 30,
+          "draws": 5,
+          "losses": 5,
+          "unresolved": 0,
+          "completed_score": 0.8125,
+          "pessimistic_score": 0.8125,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.5388335847444014,
+          "score_upper_one_sided": 1.0,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        },
+        {
+          "opponent_elo": 2400,
+          "games": 40,
+          "pairs": 20,
+          "wins": 19,
+          "draws": 12,
+          "losses": 9,
+          "unresolved": 0,
+          "completed_score": 0.625,
+          "pessimistic_score": 0.625,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.35133358474440135,
+          "score_upper_one_sided": 0.8986664152555986,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        },
+        {
+          "opponent_elo": 2800,
+          "games": 40,
+          "pairs": 20,
+          "wins": 3,
+          "draws": 20,
+          "losses": 17,
+          "unresolved": 0,
+          "completed_score": 0.325,
+          "pessimistic_score": 0.325,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.05133358474440136,
+          "score_upper_one_sided": 0.5986664152555987,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/elo-ladder.json"
+    },
+    {
+      "name": "final-v-original-native",
+      "phase": "regression",
+      "candidate": {
+        "name": "Proton Chess 0.3.0",
+        "sha256": "1ea5e0c671ec977655282ad127a0b76ff664e45fc2ccb64a17a09555dde77463"
+      },
+      "opponent": {
+        "name": "Proton Chess",
+        "sha256": "92e1d239a340baa0046f84cbe1dac2faa74374d3097ce6f97cf265c91d8dc7cd"
+      },
+      "settings": {
+        "games": 160,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261011,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 160,
+          "pairs": 80,
+          "wins": 60,
+          "draws": 55,
+          "losses": 45,
+          "unresolved": 0,
+          "completed_score": 0.546875,
+          "pessimistic_score": 0.546875,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.4100417923722007,
+          "score_upper_one_sided": 0.6837082076277994,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/final-v-original-native.json"
+    },
+    {
+      "name": "full-stockfish",
+      "phase": "exploratory",
+      "candidate": {
+        "name": "Proton Chess 0.3.0",
+        "sha256": "1ea5e0c671ec977655282ad127a0b76ff664e45fc2ccb64a17a09555dde77463"
+      },
+      "opponent": {
+        "name": "Stockfish 19",
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 40,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261012,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 40,
+          "pairs": 20,
+          "wins": 0,
+          "draws": 0,
+          "losses": 40,
+          "unresolved": 0,
+          "completed_score": 0.0,
+          "pessimistic_score": 0.0,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.0,
+          "score_upper_one_sided": 0.27366641525559865,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "full_evidence": "results/2026-10-01/full-stockfish.json"
+    }
+  ],
+  "benchmark": {
+    "depth": 11,
+    "repetitions": 5,
+    "summary": [
+      {
+        "position": "startpos",
+        "nodes": 559765,
+        "portable_median_ms": 342,
+        "native_median_ms": 314,
+        "speedup": 1.089
+      },
+      {
+        "position": "kiwipete",
+        "nodes": 475968,
+        "portable_median_ms": 400,
+        "native_median_ms": 366,
+        "speedup": 1.093
+      },
+      {
+        "position": "endgame",
+        "nodes": 144250,
+        "portable_median_ms": 52,
+        "native_median_ms": 50,
+        "speedup": 1.04
+      }
+    ]
+  }
+}
