@@ -30,7 +30,7 @@ endif()
 if(MSVC)
     target_compile_options(proton_engine PRIVATE /W4 /permissive- /EHsc)
     if(PROTON_NATIVE)
-        target_compile_options(proton_engine PRIVATE /arch:AVX2)
+        target_compile_options(proton_engine PUBLIC /arch:AVX2)
     endif()
 else()
     target_compile_options(proton_engine PRIVATE
@@ -39,7 +39,7 @@ else()
         $<$<CONFIG:RelWithDebInfo>:-O3>
     )
     if(PROTON_NATIVE)
-        target_compile_options(proton_engine PRIVATE $<$<CONFIG:Release>:-march=native>)
+        target_compile_options(proton_engine PUBLIC $<$<CONFIG:Release>:-march=native>)
     endif()
     if(PROTON_SANITIZERS)
         # PUBLIC is intentional: proton_engine is a static library, so the
