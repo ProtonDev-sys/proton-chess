@@ -1,0 +1,215 @@
+name: Finalize teacher residual evaluator
+
+on:
+  push:
+    branches: [agent/teacher-residual-psqt]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message, '[teacher-finalized]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+      - name: Check out exact main baseline
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: candidate/requirements.txt
+      - name: Install match dependency
+        run: python -m pip install -r candidate/requirements.txt
+      - name: Build and test candidate
+        run: >-
+          cmake -S candidate -B candidate/build-final -DCMAKE_BUILD_TYPE=Release &&
+          cmake --build candidate/build-final --parallel 2 &&
+          ctest --test-dir candidate/build-final -C Release --output-on-failure
+      - name: Build exact baseline
+        run: >-
+          cmake -S baseline -B baseline/build-final -DCMAKE_BUILD_TYPE=Release
+          -DPROTON_BUILD_TESTS=OFF &&
+          cmake --build baseline/build-final --parallel 2
+      - name: Deterministic search comparison
+        working-directory: candidate
+        run: >-
+          python tools/compare_search.py build-final/proton_chess
+          ../baseline/build-final/proton_chess
+          --candidate-label teacher-residual-25
+          --baseline-label main
+          --openings openings/uho_lichess_4852_v1_200.epd
+          --positions 100 --depth 8 --hash 16 --trials 2 --timeout 60
+          --json build-final/teacher-search.json
+      - name: Three-budget paired match
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          python tools/compare_engines.py build-final/proton_chess \
+            ../baseline/build-final/proton_chess \
+            --candidate-label teacher-residual-25 --baseline-label main \
+            --games 400 --nodes 1000 --watchdog-grace 3 --max-plies 160 \
+            --hash 16 --seed 20261320 \
+            --openings openings/uho_lichess_4852_v1_200.epd \
+            --json build-final/teacher-match-1000.json
+          python tools/compare_engines.py build-final/proton_chess \
+            ../baseline/build-final/proton_chess \
+            --candidate-label teacher-residual-25 --baseline-label main \
+            --games 400 --nodes 3000 --watchdog-grace 3 --max-plies 160 \
+            --hash 16 --seed 20261321 \
+            --openings openings/uho_lichess_4852_v1_200.epd \
+            --json build-final/teacher-match-3000.json
+          python tools/compare_engines.py build-final/proton_chess \
+            ../baseline/build-final/proton_chess \
+            --candidate-label teacher-residual-25 --baseline-label main \
+            --games 400 --nodes 5000 --watchdog-grace 3 --max-plies 160 \
+            --hash 16 --seed 20261322 \
+            --openings openings/uho_lichess_4852_v1_200.epd \
+            --json build-final/teacher-match-5000.json
+      - name: Enforce acceptance gate and write permanent record
+        working-directory: candidate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          budgets = {}
+          wins = draws = losses = 0
+          for nodes in (1000, 3000, 5000):
+              data = json.loads(Path(
+                  f'build-final/teacher-match-{nodes}.json').read_text())
+              result = data['result']
+              row = {
+                  key: result.get(key)
+                  for key in (
+                      'games', 'wins', 'draws', 'losses', 'score',
+                      'exact_p_gain', 'exact_p_regression',
+                      'estimated_elo_delta')
+              }
+              budgets[str(nodes)] = row
+              wins += result['wins']
+              draws += result['draws']
+              losses += result['losses']
+
+          games = wins + draws + losses
+          score = (wins + 0.5 * draws) / games
+          metadata = json.loads(Path(
+              'training/residual_psqt_v1.json').read_text())
+          search = json.loads(Path(
+              'build-final/teacher-search.json').read_text())
+          report = {
+              'schema_version': 1,
+              'candidate_commit': '${{ github.sha }}',
+              'baseline_ref': 'main',
+              'protocol': {
+                  'opening_suite': 'openings/uho_lichess_4852_v1_200.epd',
+                  'games_per_budget': 400,
+                  'nodes_per_move': [1000, 3000, 5000],
+                  'max_plies': 160,
+                  'hash_mb': 16,
+                  'seeds': [20261320, 20261321, 20261322],
+                  'color_swapped': True,
+              },
+              'budgets': budgets,
+              'aggregate': {
+                  'games': games,
+                  'wins': wins,
+                  'draws': draws,
+                  'losses': losses,
+                  'score': score,
+              },
+              'held_out_teacher_fit': {
+                  key: metadata[key]
+                  for key in (
+                      'training_positions', 'validation_positions',
+                      'baseline_rmse_cp', 'candidate_rmse_cp',
+                      'baseline_mae_cp', 'candidate_mae_cp',
+                      'ridge_lambda', 'blend_percent',
+                      'positions_sha256', 'labels_sha256')
+              },
+              'deterministic_search_summary': search.get('summary', {}),
+          }
+
+          no_reversal = all(
+              row['score'] is not None and row['score'] >= 0.50
+              for row in budgets.values())
+          fit_improved = (
+              metadata['candidate_rmse_cp'] < metadata['baseline_rmse_cp']
+              and metadata['candidate_mae_cp'] < metadata['baseline_mae_cp'])
+          accepted = no_reversal and score >= 0.51 and fit_improved
+          report['accepted'] = accepted
+          Path('training/residual_psqt_v1_match.json').write_text(
+              json.dumps(report, indent=2, sort_keys=True) + '\n')
+          if not accepted:
+              raise SystemExit(
+                  f'residual evaluator rejected: score={score:.6f}, '
+                  f'no_reversal={no_reversal}, fit_improved={fit_improved}')
+
+          lines = [
+              '# Stockfish-18 teacher residual evaluator',
+              '',
+              'This directory records the independently generated tapered '
+              'residual evaluator used by Proton.',
+              '',
+              'The teacher is the official Stockfish 18 `sf_18` static NNUE '
+              'evaluation. No Stockfish source code or network is embedded in '
+              'the Proton binary. The generated table is an independently '
+              'fitted set of small residual coefficients applied at a 25% blend.',
+              '',
+              '## Data and fit',
+              '',
+              f"- Training positions: {metadata['training_positions']}",
+              f"- Held-out positions: {metadata['validation_positions']}",
+              f"- Baseline RMSE: {metadata['baseline_rmse_cp']:.3f} cp",
+              f"- Residual RMSE: {metadata['candidate_rmse_cp']:.3f} cp",
+              f"- Baseline MAE: {metadata['baseline_mae_cp']:.3f} cp",
+              f"- Residual MAE: {metadata['candidate_mae_cp']:.3f} cp",
+              f"- Ridge lambda: {metadata['ridge_lambda']}",
+              f"- Blend: {metadata['blend_percent']}%",
+              '',
+              '## Engine A/B validation',
+              '',
+              '| Nodes/move | W-D-L | Score |',
+              '|---:|---:|---:|',
+          ]
+          for nodes in ('1000', '3000', '5000'):
+              row = budgets[nodes]
+              lines.append(
+                  f"| {nodes} | {row['wins']}-{row['draws']}-"
+                  f"{row['losses']} | {100 * row['score']:.3f}% |")
+          lines += [
+              '',
+              f"Aggregate: {wins}-{draws}-{losses} over {games} games, "
+              f"{100 * score:.3f}%.",
+              '',
+              'The complete machine-readable record is '
+              '`residual_psqt_v1_match.json`. Timing and strength claims apply '
+              'only to the pinned binaries and protocol in that file.',
+              '',
+              '## Reproduction metadata',
+              '',
+              '`residual_psqt_v1.json` records the teacher, deterministic seed, '
+              'opening suite, split method, fit parameters, and SHA-256 hashes '
+              'of the generated position and label streams.',
+          ]
+          Path('training/README.md').write_text('\n'.join(lines) + '\n')
+          PY
+      - name: Commit accepted record and remove temporary workflows
+        working-directory: candidate
+        run: |
+          git config user.name "Proton engine automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          rm -f .github/workflows/teacher-residual-benchmark.yml
+          rm -f .github/workflows/finalize-teacher-residual.yml
+          git add -A training .github/workflows
+          git commit -m "Record accepted residual-evaluator evidence [teacher-finalized]"
+          git push
