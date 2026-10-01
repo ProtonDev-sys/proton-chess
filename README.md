@@ -1,11 +1,11 @@
 # Proton Chess
 
-A standalone C++20 UCI chess engine. Version 0.3.0 uses handcrafted tapered
+A standalone C++20 UCI chess engine. Version 0.3.1 uses handcrafted tapered
 evaluation and single-threaded alpha-beta search: PVS, aspiration windows,
 transposition tables, quiescence, SEE, null-move pruning, late-move reductions,
 history heuristics, pawn correction history, and conservative singular extensions.
-Evaluation includes safe mobility, nonlinear king pressure, and dynamic passed
-pawns. This is not an NNUE or GPU engine.
+Evaluation includes pawn-safe minor-piece mobility, king safety, supported
+passers, and bounded cheaper-attacker threats. This is not an NNUE or GPU engine.
 
 ## Build and test
 
@@ -65,9 +65,10 @@ python tools/paired_match.py build/native/Release/proton_chess.exe external/sf_1
 
 Repeat `--opponent-elo` for a difficulty ladder; omit it to test the opponent at
 full strength. The second executable can also be an older Proton build for
-self-play. `tools/estimate_elo.py` is a compatibility entry point to the same
-runner, not a human-Elo estimator. On Linux, use the paths printed by the
-downloader and the single-config build path.
+self-play. The existing `tools/estimate_elo.py` and match/search protocols remain
+available with their own command-line interfaces and validation suites; they are
+not replaced by this additional confirmation runner. On Linux, use the paths
+printed by the downloader and the single-config build path.
 
 Each randomly sampled opening is played with both colors. Both engines receive
 one thread, equal hash, 1 ms move overhead where supported, books off, and maximum
@@ -103,3 +104,36 @@ Builds, downloads, caches, and full match output stay outside tracked source.
 Keep baseline binaries and experiment records as local recovery/evidence rather
 than committing generated artifacts. The measured iteration report belongs in
 `docs/strength-2026-10-01.md`.
+
+## Additional engine controls and protocols
+
+## Human-style play
+
+Use the engine through any UCI-compatible chess interface. The direct controls are:
+
+```text
+setoption name HumanStyle value true
+setoption name HumanSkill value 20
+setoption name HumanMaxLossCp value 12
+setoption name HumanVariety value 35
+setoption name HumanSeed value 1
+```
+
+`HumanSkill` ranges from 0 to 20. Lower values widen the set of acceptable alternatives. `HumanMaxLossCp` sets the intentional centipawn-loss ceiling at skill 20. `HumanVariety` is the percentage chance that a position is allowed to consider a verified alternative; it controls opportunity frequency rather than error size. `HumanSeed` makes both the opportunity decision and move choice reproducible.
+
+For standard UCI strength limiting, use:
+
+```text
+setoption name UCI_LimitStrength value true
+setoption name UCI_Elo value 2200
+```
+
+The supported UCI Elo range is 800–3000. The Elo control maps to the same bounded human selector rather than merely cutting search depth. Its profiles independently taper the acceptable loss and alternative-selection opportunity rate; these modes are behavioral presets, not certified rating guarantees.
+
+Human mode does not blindly add noise. A failed opportunity roll returns the full-search move without reserving confirmation budget. An active opportunity preserves forced mates, filters alternatives against the configured loss allowance, and confirms a sampled candidate with a separate restricted search before returning it. The style policy favours normal development, castling, central pawn play, phase-appropriate king activity, and tactical moves when they are justified.
+
+## Validation and benchmarking
+
+The repository includes native tests, UCI protocol smoke tests, perft regressions, legal move-generation cross-checks, deterministic fixed-search comparison tooling, and paired engine-match tooling under `tools/`.
+
+A passing test suite proves correctness of the covered invariants; it is not by itself an Elo claim. Strength changes should be evaluated with the pinned paired-search and colour-swapped match protocols described in `matches/README.md`.

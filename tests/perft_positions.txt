@@ -1,0 +1,5 @@
+startpos; depth=1; nodes=20
+startpos; depth=2; nodes=400
+startpos; depth=3; nodes=8902
+r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1; depth=1; nodes=48
+rnbq1k1r/pppp1ppp/4pn2/8/1bBP4/5N2/PP3PPP/RNBQK2R b KQ - 2 5; depth=1; nodes=35

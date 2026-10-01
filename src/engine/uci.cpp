@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <string_view>
@@ -110,9 +111,13 @@ void UciLoop::start_search(const SearchLimits& limits) {
     if (limits.ponder) search_.begin_ponder();
 
     Position root = position_;
-    worker_ = std::thread([this, root = std::move(root), limits]() mutable {
+    std::promise<void> search_started;
+    std::future<void> search_started_future = search_started.get_future();
+    worker_ = std::thread([this, root = std::move(root), limits,
+                           search_started = std::move(search_started)]() mutable {
         const SearchResult result = search_.think(std::move(root), limits,
-            [this](const SearchInfo& info) { print_info(info); });
+            [this](const SearchInfo& info) { print_info(info); },
+            [&search_started] { search_started.set_value(); });
 
         if (limits.ponder) {
             std::unique_lock lock(ponder_mutex_);
@@ -124,6 +129,7 @@ void UciLoop::start_search(const SearchLimits& limits) {
         if (!result.ponder.is_null()) output << " ponder " << result.ponder.to_uci();
         print_line(output.str());
     });
+    search_started_future.wait();
 }
 
 void UciLoop::handle_position(const std::string& line) {
@@ -213,21 +219,19 @@ void UciLoop::handle_setoption(const std::string& line) {
     } else if (key == "bookrandomness" && parse_int(value, number)) {
         options_.book_randomness = std::clamp(number, 0, 100);
     } else if (key == "uci_limitstrength") {
-        options_.human_style = lower_value == "true" || lower_value == "1";
+        options_.uci_limit_strength = lower_value == "true" || lower_value == "1";
     } else if (key == "uci_elo" && parse_int(value, number)) {
-        const int elo = std::clamp(number, 800, 2800);
-        options_.human_skill = std::clamp((elo - 800) / 100, 0, 20);
-        options_.human_max_loss_cp = std::clamp((2800 - elo) / 8, 8, 250);
+        options_.uci_elo = std::clamp(number, UciEloMin, UciEloMax);
     } else if (key == "skill level" && parse_int(value, number)) {
         options_.human_skill = std::clamp(number, 0, 20);
-        options_.human_style = options_.human_skill < 20;
     } else if (key == "humanstyle") {
         options_.human_style = lower_value == "true" || lower_value == "1";
     } else if (key == "humanskill" && parse_int(value, number)) {
         options_.human_skill = std::clamp(number, 0, 20);
-        options_.human_style = true;
     } else if (key == "humanmaxlosscp" && parse_int(value, number)) {
         options_.human_max_loss_cp = std::clamp(number, 0, 500);
+    } else if (key == "humanvariety" && parse_int(value, number)) {
+        options_.human_variety_percent = std::clamp(number, 0, 100);
     } else if (key == "moveoverhead" && parse_int(value, number)) {
         options_.move_overhead_ms = std::clamp(number, 0, 5000);
     } else if (key == "contempt" && parse_int(value, number)) {
@@ -321,11 +325,14 @@ void UciLoop::handle_command(const std::string& line, bool& quit) {
         print_line("option name BookFile type string default openings/book_lines.txt");
         print_line("option name BookRandomness type spin default 0 min 0 max 100");
         print_line("option name UCI_LimitStrength type check default false");
-        print_line("option name UCI_Elo type spin default 2800 min 800 max 2800");
+        print_line("option name UCI_Elo type spin default " + std::to_string(UciEloDefault) +
+                   " min " + std::to_string(UciEloMin) +
+                   " max " + std::to_string(UciEloMax));
         print_line("option name Skill Level type spin default 20 min 0 max 20");
         print_line("option name HumanStyle type check default false");
         print_line("option name HumanSkill type spin default 20 min 0 max 20");
         print_line("option name HumanMaxLossCp type spin default 12 min 0 max 500");
+        print_line("option name HumanVariety type spin default 35 min 0 max 100");
         print_line("option name HumanSeed type string default 0");
         print_line("option name MoveOverhead type spin default 25 min 0 max 5000");
         print_line("option name Contempt type spin default 0 min -100 max 100");
@@ -351,6 +358,14 @@ void UciLoop::handle_command(const std::string& line, bool& quit) {
     } else if (line == "eval") {
         stop_search();
         print_line("info string evaluation " + std::to_string(evaluator_.evaluate(position_)) + " cp");
+    } else if (line == "moves") {
+        stop_search();
+        std::vector<Move> legal_moves;
+        position_.generate_legal_moves(legal_moves);
+        std::sort(legal_moves.begin(), legal_moves.end(), [](const Move& lhs, const Move& rhs) {
+            return lhs.to_uci() < rhs.to_uci();
+        });
+        for (const Move& move : legal_moves) print_line(move.to_uci());
     } else if (line.rfind("perft ", 0) == 0) {
         stop_search();
         int depth = 0;

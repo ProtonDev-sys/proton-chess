@@ -11,6 +11,7 @@ namespace proton {
 
 struct UndoState {
     Piece captured = Empty;
+    std::int8_t ep_hash_file = -1;
     int captured_square = NoSquare;
     int castling_rights = 0;
     int ep_square = NoSquare;
@@ -54,6 +55,9 @@ public:
 
     [[nodiscard]] bool is_square_attacked(int square, Color by) const;
     [[nodiscard]] bool in_check(Color color) const;
+    // Predicts the opponent's check state after a structurally valid pseudo-move.
+    // Own-king legality remains the responsibility of make_move().
+    [[nodiscard]] bool gives_check(const Move& move) const;
     [[nodiscard]] bool is_draw_by_material() const;
     [[nodiscard]] bool is_repetition(int required_occurrences = 3) const;
     [[nodiscard]] int king_square(Color color) const;
@@ -66,6 +70,7 @@ private:
     std::array<Bitboard, 13> pieces_{};
     std::array<Bitboard, 2> occupancy_{};
     Color stm_ = White;
+    std::int8_t ep_hash_file_ = -1;
     int castling_ = 0;
     int ep_ = NoSquare;
     int halfmove_ = 0;
@@ -83,7 +88,7 @@ private:
     void remove_piece(Piece piece, int square);
     void move_piece(Piece piece, int from, int to);
     [[nodiscard]] std::uint64_t compute_key() const;
-    [[nodiscard]] int ep_hash_file() const;
+    [[nodiscard]] std::int8_t ep_hash_file() const;
     void push_history();
     void pop_history();
     void generate_pseudo_legal_moves(std::vector<Move>& moves, bool captures_only) const;

@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "match_type": "stockfish18_fixed_node_boundary_extension",
+  "status": "complete",
+  "created_utc": "2026-08-21T02:40:00+00:00",
+  "proton": {
+    "source_commit": "b7c7e1fe855d0b3d0564558faf8bcc35eff324ef",
+    "binary_sha256": "06490bf5eeb499bc3bfe5d0fbf6cef108feaa1d4365ef6370d8b85c90969a2b9",
+    "full_strength": true,
+    "options": {
+      "Hash": 16,
+      "UseBook": false,
+      "HumanStyle": false,
+      "UCI_LimitStrength": false
+    }
+  },
+  "stockfish": {
+    "source_ref": "sf_18",
+    "binary_sha256": "3bcf4c8e90b6014d9f9bbecafd5b0540f8c8e18244b7c8b2a83ba272177d9c3b",
+    "threads": 1,
+    "limited": true
+  },
+  "openings": {
+    "path": "openings/uho_lichess_4852_v1_200.epd",
+    "sha256": "4d94a44a0a3c8d687b145a4efd594acaa0ab8c904873784c662beafb50055b6d",
+    "unique_positions": 200,
+    "color_swapped": true
+  },
+  "time_control": {
+    "mode": "fixed_nodes",
+    "nodes_per_move": 1000,
+    "hash_mb": 16,
+    "max_plies": 200,
+    "watchdog_grace_seconds": 2.0
+  },
+  "seed": 20260823,
+  "statistical_unit": "one color-swapped opening pair",
+  "confidence_method": "Hoeffding two-sided 95% interval over 200 opening-pair scores",
+  "definitions": {
+    "confidently_beats": "complete 400-game level and lower 95% pair-based score bound > 0.50",
+    "confidently_dominates": "confidently_beats and observed score >= 0.70"
+  },
+  "tooling": {
+    "match_core_sha256": "df6d62cf76bc3588b77177555c6ddd1234008aff49a5a1976308476bea9e26ee",
+    "boundary_shard_harness_sha256": "46c9d20648aac99f5212b7fd5038131b7827c9fa0cded3b68df62efa0225bf82"
+  },
+  "levels": [
+    {
+      "stockfish_uci_elo": 1550,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 298,
+      "draws": 58,
+      "losses": 44,
+      "score": 0.8175,
+      "score_ci95_low": 0.7214677208680079,
+      "score_ci95_high": 0.9135322791319921,
+      "confidently_beats": true,
+      "confidently_dominates": true
+    },
+    {
+      "stockfish_uci_elo": 1566,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 295,
+      "draws": 68,
+      "losses": 37,
+      "score": 0.8225,
+      "score_ci95_low": 0.7264677208680079,
+      "score_ci95_high": 0.9185322791319921,
+      "confidently_beats": true,
+      "confidently_dominates": true
+    },
+    {
+      "stockfish_uci_elo": 1567,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 253,
+      "draws": 84,
+      "losses": 63,
+      "score": 0.7375,
+      "score_ci95_low": 0.641467720868008,
+      "score_ci95_high": 0.8335322791319921,
+      "confidently_beats": true,
+      "confidently_dominates": true
+    },
+    {
+      "stockfish_uci_elo": 1568,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 237,
+      "draws": 89,
+      "losses": 74,
+      "score": 0.70375,
+      "score_ci95_low": 0.6077177208680079,
+      "score_ci95_high": 0.7997822791319921,
+      "confidently_beats": true,
+      "confidently_dominates": true
+    },
+    {
+      "stockfish_uci_elo": 1569,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 225,
+      "draws": 99,
+      "losses": 76,
+      "score": 0.68625,
+      "score_ci95_low": 0.590217720868008,
+      "score_ci95_high": 0.7822822791319921,
+      "confidently_beats": true,
+      "confidently_dominates": false
+    },
+    {
+      "stockfish_uci_elo": 1571,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 228,
+      "draws": 93,
+      "losses": 79,
+      "score": 0.68625,
+      "score_ci95_low": 0.590217720868008,
+      "score_ci95_high": 0.7822822791319921,
+      "confidently_beats": true,
+      "confidently_dominates": false
+    },
+    {
+      "stockfish_uci_elo": 1575,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 221,
+      "draws": 106,
+      "losses": 73,
+      "score": 0.685,
+      "score_ci95_low": 0.588967720868008,
+      "score_ci95_high": 0.7810322791319921,
+      "confidently_beats": true,
+      "confidently_dominates": false
+    },
+    {
+      "stockfish_uci_elo": 1750,
+      "games": 400,
+      "opening_pairs": 200,
+      "wins": 156,
+      "draws": 119,
+      "losses": 125,
+      "score": 0.53875,
+      "score_ci95_low": 0.44271772086800787,
+      "score_ci95_high": 0.634782279131992,
+      "confidently_beats": false,
+      "confidently_dominates": false
+    }
+  ],
+  "conclusions": {
+    "highest_tested_confidently_dominated_uci_elo": 1568,
+    "next_tested_integer_uci_elo": 1569,
+    "next_tested_integer_score": 0.68625,
+    "highest_tested_confidently_beaten_uci_elo": 1700,
+    "lowest_tested_inconclusive_level_above_1700": 1750,
+    "unrestricted_stockfish18_score_from_prior_screen": 0.09,
+    "portable_absolute_elo_claim": false
+  },
+  "limitations": [
+    "Stockfish UCI_Elo is an engine limiter setting, not a portable human Elo measurement.",
+    "Fixed-node results describe the pinned binaries, opening suite, and 1000-node budget.",
+    "Levels 1701 through 1749 were not exhaustively tested.",
+    "The unrestricted Stockfish result is the separate 100-game screen recorded in stockfish18_nodes1000_20260823_summary.json."
+  ],
+  "raw_shards": {
+    "layout": "four 100-game shards at offsets 0, 50, 100, and 150 for each level",
+    "sha256_manifest": "available in the calibration run log; aggregate result reproduced from 200 pair_scores per level"
+  }
+}

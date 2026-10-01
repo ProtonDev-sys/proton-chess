@@ -1,0 +1,17 @@
+# Castling rights and pinned-piece pressure.
+r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1
+# Mixed castling rights with tactical replies.
+rnbq1k1r/pppp1ppp/4pn2/8/1bBP4/5N2/PP3PPP/RNBQK2R b KQ - 2 5
+# Check evasions and rook activity.
+8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1
+# Promotions, castling, and exposed kings.
+r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 b kq - 0 1
+# En passant target from an opening position.
+rnbqkb1r/pp1p1ppp/5n2/2p1p3/1P2P3/2N5/P1PP1PPP/R1BQKBNR b KQkq b3 0 3
+# Minimal en passant legality case.
+8/8/8/3pP3/8/8/8/k6K w - d6 0 1
+# Underpromotion availability.
+4k3/P7/8/8/8/8/7p/4K3 w - - 0 1
+# Stale castling rights without a rook must be ignored.
+4k3/8/8/8/8/8/8/4K3 w K - 0 1
+4k3/8/8/8/8/8/8/4K3 b k - 0 1

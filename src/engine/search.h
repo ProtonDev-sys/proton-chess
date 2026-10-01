@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <random>
 #include <unordered_map>
 #include <vector>
@@ -12,6 +13,8 @@
 #include "eval.h"
 
 namespace proton {
+
+struct SearchTestAccess;
 
 struct SearchLimits {
     int depth = 0;
@@ -26,6 +29,8 @@ struct SearchLimits {
     bool ponder = false;
     bool search_moves_specified = false;
     std::vector<Move> search_moves;
+    std::vector<const std::atomic<bool>*> external_stops;
+    const std::chrono::steady_clock::time_point* external_deadline = nullptr;
 };
 
 struct SearchInfo {
@@ -53,8 +58,10 @@ struct SearchResult {
 class Search {
 public:
     using InfoCallback = std::function<void(const SearchInfo&)>;
+    using StartCallback = std::function<void()>;
 
-    explicit Search(Evaluator& evaluator);
+    explicit Search(Evaluator& evaluator,
+                    const EngineOptions& initial_options = EngineOptions{});
 
     void set_options(const EngineOptions& options);
     void new_game();
@@ -64,7 +71,8 @@ public:
     [[nodiscard]] bool is_searching() const { return searching_.load(std::memory_order_relaxed); }
 
     SearchResult think(Position position, const SearchLimits& limits,
-                       const InfoCallback& callback = {});
+                       const InfoCallback& callback = {},
+                       const StartCallback& start_callback = {});
 
     [[nodiscard]] static constexpr int mate_score() { return 32000; }
     [[nodiscard]] static constexpr int mate_threshold() { return 31800; }
@@ -108,6 +116,8 @@ private:
         int see = 0;
     };
 
+    using ContinuationRows = std::array<const std::int16_t*, 2>;
+
     struct RootMove {
         Move move = Move::null();
         int score = NoScore;
@@ -140,11 +150,18 @@ private:
     std::chrono::steady_clock::time_point start_time_{};
     std::chrono::steady_clock::time_point soft_deadline_{};
     std::chrono::steady_clock::time_point hard_deadline_{};
+    std::chrono::steady_clock::time_point main_deadline_{};
     bool has_soft_deadline_ = false;
     bool has_hard_deadline_ = false;
+    bool has_main_deadline_ = false;
     bool ponder_time_activated_ = false;
     int soft_time_budget_ms_ = 0;
     int hard_time_budget_ms_ = 0;
+    std::uint64_t main_node_limit_ = 0;
+    bool main_phase_ = false;
+    bool main_budget_exhausted_ = false;
+    bool selection_budget_reserved_ = false;
+    bool selection_opportunity_ = false;
 
     std::array<std::array<Move, 2>, MaxPly> killers_{};
     std::array<std::array<std::array<int, 64>, 64>, 2> history_{};
@@ -166,6 +183,7 @@ private:
     std::unordered_map<std::uint64_t, std::vector<BookMove>> book_{};
     std::mt19937_64 random_{};
     Color root_side_ = White;
+    bool verification_search_ = false;
 
     void resize_hash(int megabytes);
     void clear_hash();
@@ -182,6 +200,7 @@ private:
     void activate_time_budget(std::chrono::steady_clock::time_point now);
     void activate_ponder_time_if_needed();
     [[nodiscard]] bool should_stop(bool force_time_check = false);
+    [[nodiscard]] bool search_aborted() const;
     [[nodiscard]] bool soft_time_expired() const;
     [[nodiscard]] int elapsed_ms() const;
 
@@ -189,14 +208,17 @@ private:
                    bool pv_node, bool cut_node, bool allow_null,
                    const Move& previous_move, const Move& excluded_move = Move::null());
     int quiescence(Position& position, int alpha, int beta, int ply);
+    [[nodiscard]] Move find_quiet_mate(Position& position, int ply);
     int search_root(Position& position, std::vector<RootMove>& root_moves,
                     int depth, int alpha, int beta);
 
     void score_moves(const Position& position, const std::vector<Move>& moves,
-                              int ply, const Move& tt_move, bool captures_only);
-    [[nodiscard]] int move_order_score(const Position& position, const Move& move,
-                                       int ply, const Move& tt_move,
-                                       bool captures_only, int see) const;
+                     int ply, const Move& tt_move, bool captures_only,
+                     const ContinuationRows& continuation_rows);
+    [[nodiscard]] int move_order_score(
+        const Position& position, const Move& move, int ply,
+        const Move& tt_move, bool captures_only, int see,
+        const ContinuationRows& continuation_rows) const;
     [[nodiscard]] static int captured_value(const Position& position, const Move& move);
     [[nodiscard]] static int promotion_gain(const Move& move);
     void update_quiet_history(const Position& position, Color color, const Move& best,
@@ -205,8 +227,10 @@ private:
                                 const std::vector<Move>& tried_captures);
     static void apply_history_bonus(int& value, int bonus);
     static void apply_continuation_bonus(std::int16_t& value, int bonus);
-    [[nodiscard]] int continuation_score(const Position& position,
-                                         const Move& move, int ply) const;
+    [[nodiscard]] ContinuationRows continuation_rows(int ply) const;
+    [[nodiscard]] static int continuation_score(
+        const Position& position, const Move& move,
+        const ContinuationRows& continuation_rows);
     void update_correction_history(const Position& position, int depth,
                                    int raw_eval, int score, Bound bound);
     [[nodiscard]] int corrected_static_eval(const Position& position,
@@ -222,6 +246,8 @@ private:
     [[nodiscard]] Move select_human_move(const Position& position,
                                          std::vector<RootMove>& root_moves,
                                          int completed_depth);
+    [[nodiscard]] std::optional<SearchResult> confirm_human_candidate(
+        const Position& position, const Move& candidate, int completed_depth);
 
     [[nodiscard]] int draw_score(const Position& position) const;
     [[nodiscard]] int rule50_score(Position& position, int ply, bool in_check);

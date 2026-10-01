@@ -16,6 +16,50 @@ namespace proton {
 namespace {
 
 constexpr int RootPolicyScale = 24;
+constexpr int QuietMateScanMaxPly = 3;
+
+struct HumanSettings {
+    bool enabled = false;
+    int skill = 20;
+    int max_loss_cp = 12;
+    int variety_percent = 0;
+};
+
+HumanSettings resolved_human_settings(const EngineOptions& options) {
+    if (options.uci_limit_strength) {
+        const UciEloProfile profile = uci_elo_profile(options.uci_elo);
+        return HumanSettings{
+            true,
+            profile.skill,
+            profile.max_loss_cp,
+            profile.variety_percent,
+        };
+    }
+    return HumanSettings{
+        options.human_style || options.human_skill < 20,
+        std::clamp(options.human_skill, 0, 20),
+        std::clamp(options.human_max_loss_cp, 0, 500),
+        std::clamp(options.human_variety_percent, 0, 100),
+    };
+}
+
+bool human_selection_opportunity(const HumanSettings& human,
+                                 std::mt19937_64& random) {
+    if (!human.enabled || human.variety_percent <= 0) return false;
+    if (human.variety_percent >= 100) return true;
+
+    // The engine's raw generator is specified; distribution implementations are
+    // not. A direct draw keeps seeded opportunity decisions reproducible across
+    // standard libraries. The modulo bias is negligible for a 64-bit source.
+    return random() % 100ULL <
+           static_cast<std::uint64_t>(human.variety_percent);
+}
+
+int human_loss_allowance(const HumanSettings& human) {
+    const int skill_gap = 20 - human.skill;
+    return std::clamp(human.max_loss_cp + skill_gap * 8 +
+                      skill_gap * skill_gap * 2, 0, 700);
+}
 
 bool same_move(const Move& lhs, const Move& rhs) {
     return !lhs.is_null() && !rhs.is_null() && lhs == rhs;
@@ -31,10 +75,12 @@ int clamp_score(int score) {
 
 }  // namespace
 
-Search::Search(Evaluator& evaluator)
+Search::Search(Evaluator& evaluator, const EngineOptions& initial_options)
     : evaluator_(evaluator),
+      options_(initial_options),
       continuation_history_(HistoryStateCount * HistoryStateCount, 0),
       continuation_history_2_(HistoryStateCount * HistoryStateCount, 0) {
+    options_.hash_mb = std::clamp(options_.hash_mb, 1, 4096);
     for (int ply = 0; ply < MaxPly; ++ply) {
         generated_moves_[ply].reserve(96);
         tried_quiets_[ply].reserve(64);
@@ -42,20 +88,25 @@ Search::Search(Evaluator& evaluator)
         move_lists_[ply].reserve(96);
     }
     resize_hash(options_.hash_mb);
-    build_builtin_book();
-    std::random_device device;
-    random_.seed((static_cast<std::uint64_t>(device()) << 32U) ^ device());
+    if (options_.use_book) build_builtin_book();
+    if (options_.human_seed != 0) {
+        random_.seed(options_.human_seed);
+    } else {
+        std::random_device device;
+        random_.seed((static_cast<std::uint64_t>(device()) << 32U) ^ device());
+    }
 }
 
 void Search::set_options(const EngineOptions& options) {
     const bool hash_changed = options.hash_mb != options_.hash_mb;
     const bool book_changed = options.book_file != options_.book_file;
+    const bool build_book = options.use_book && (!options_.use_book || book_changed);
     const bool seed_changed = options.human_seed != options_.human_seed;
     const bool contempt_changed = options.contempt_cp != options_.contempt_cp;
     options_ = options;
     if (hash_changed) resize_hash(options_.hash_mb);
     else if (contempt_changed) clear_hash();
-    if (book_changed) build_builtin_book();
+    if (build_book) build_builtin_book();
     if (seed_changed) {
         if (options_.human_seed != 0) {
             random_.seed(options_.human_seed);
@@ -133,7 +184,7 @@ const Search::TTEntry* Search::probe(std::uint64_t key) const {
 
 void Search::store(std::uint64_t key, int depth, int score, int static_eval,
                    Bound bound, const Move& move, int ply) {
-    if (table_.empty() || stop_requested_.load(std::memory_order_relaxed)) return;
+    if (table_.empty() || search_aborted()) return;
 
     TTBucket& bucket = table_[static_cast<std::size_t>(key) & table_mask_];
     const std::uint32_t signature = tt_signature(key);
@@ -154,14 +205,20 @@ void Search::store(std::uint64_t key, int depth, int score, int static_eval,
         }
     }
 
-    if (replacement->key == signature && replacement->bound != Bound::None &&
-        depth + 2 < replacement->depth && bound != Bound::Exact && move.is_null()) {
-        return;
+    const bool same_key = replacement->key == signature &&
+                          replacement->bound != Bound::None;
+    if (same_key) {
+        // A current move is still useful for ordering even when the new search
+        // is too shallow to replace the stored value. Keep the two decisions
+        // independent so a shallow bound cannot discard a deeper result.
+        if (!move.is_null()) replacement->move = move;
+
+        if (depth + 2 < replacement->depth && bound != Bound::Exact) {
+            replacement->generation = generation_;
+            return;
+        }
     }
 
-    if (replacement->key != signature || replacement->bound == Bound::None) {
-        replacement->move = Move::null();
-    }
     replacement->key = signature;
     replacement->score = static_cast<std::int16_t>(score_to_tt(clamp_score(score), ply));
     replacement->static_eval = static_eval == NoScore
@@ -170,7 +227,9 @@ void Search::store(std::uint64_t key, int depth, int score, int static_eval,
     replacement->depth = static_cast<std::int8_t>(std::clamp(depth, -1, MaxPly - 2));
     replacement->bound = bound;
     replacement->generation = generation_;
-    if (!move.is_null() || replacement->move.is_null()) replacement->move = move;
+    if (!same_key || !move.is_null() || replacement->move.is_null()) {
+        replacement->move = move;
+    }
 }
 
 int Search::hashfull() const {
@@ -209,6 +268,7 @@ int Search::elapsed_ms() const {
 void Search::configure_time(const Position& position) {
     has_soft_deadline_ = false;
     has_hard_deadline_ = false;
+    has_main_deadline_ = false;
     soft_time_budget_ms_ = 0;
     hard_time_budget_ms_ = 0;
     ponder_time_activated_ = !limits_.ponder;
@@ -255,6 +315,14 @@ void Search::activate_time_budget(std::chrono::steady_clock::time_point now) {
     if (hard_time_budget_ms_ > 0) {
         hard_deadline_ = now + std::chrono::milliseconds(hard_time_budget_ms_);
         has_hard_deadline_ = true;
+        if (main_phase_) {
+            const int main_budget_ms = std::max(1, hard_time_budget_ms_ / 2);
+            main_deadline_ = now + std::chrono::milliseconds(main_budget_ms);
+            if (has_soft_deadline_ && soft_deadline_ < main_deadline_) {
+                main_deadline_ = soft_deadline_;
+            }
+            has_main_deadline_ = true;
+        }
     }
 }
 
@@ -269,9 +337,25 @@ void Search::activate_ponder_time_if_needed() {
 
 bool Search::should_stop(bool force_time_check) {
     activate_ponder_time_if_needed();
+    for (const std::atomic<bool>* external_stop : limits_.external_stops) {
+        if (external_stop != nullptr &&
+            external_stop->load(std::memory_order_relaxed)) {
+            stop_requested_.store(true, std::memory_order_relaxed);
+            return true;
+        }
+    }
+    if (limits_.external_deadline != nullptr &&
+        std::chrono::steady_clock::now() >= *limits_.external_deadline) {
+        stop_requested_.store(true, std::memory_order_relaxed);
+        return true;
+    }
     if (stop_requested_.load(std::memory_order_relaxed)) return true;
     if (limits_.node_limit != 0 && nodes_ >= limits_.node_limit) {
         stop_requested_.store(true, std::memory_order_relaxed);
+        return true;
+    }
+    if (main_phase_ && main_node_limit_ != 0 && nodes_ >= main_node_limit_) {
+        main_budget_exhausted_ = true;
         return true;
     }
     if (!force_time_check && (nodes_ & 1023ULL) != 0) return false;
@@ -279,7 +363,16 @@ bool Search::should_stop(bool force_time_check) {
         stop_requested_.store(true, std::memory_order_relaxed);
         return true;
     }
+    if (main_phase_ && has_main_deadline_ &&
+        std::chrono::steady_clock::now() >= main_deadline_) {
+        main_budget_exhausted_ = true;
+        return true;
+    }
     return false;
+}
+
+bool Search::search_aborted() const {
+    return stop_requested_.load(std::memory_order_relaxed) || main_budget_exhausted_;
 }
 
 bool Search::soft_time_expired() const {
@@ -296,9 +389,10 @@ int Search::promotion_gain(const Move& move) {
     return move.is_promotion() ? piece_value(move.promotion) - piece_value(Pawn) : 0;
 }
 
-int Search::move_order_score(const Position& position, const Move& move,
-                             int ply, const Move& tt_move, bool captures_only,
-                             int see) const {
+int Search::move_order_score(
+    const Position& position, const Move& move, int ply,
+    const Move& tt_move, bool captures_only, int see,
+    const ContinuationRows& continuation_rows) const {
     if (same_move(move, tt_move)) return 30'000'000;
 
     const Piece attacker_piece = position.piece_at(move.from);
@@ -336,11 +430,12 @@ int Search::move_order_score(const Position& position, const Move& move,
 
     const Color side = position.side_to_move();
     return history_[side][move.from][move.to] +
-           continuation_score(position, move, ply);
+           continuation_score(position, move, continuation_rows);
 }
 
 void Search::score_moves(const Position& position, const std::vector<Move>& moves,
-                                  int ply, const Move& tt_move, bool captures_only) {
+                         int ply, const Move& tt_move, bool captures_only,
+                         const ContinuationRows& continuation_rows) {
     std::vector<ScoredMove>& list = move_lists_[ply];
     list.clear();
     list.reserve(std::max(list.capacity(), moves.size()));
@@ -349,7 +444,9 @@ void Search::score_moves(const Position& position, const std::vector<Move>& move
             ? static_exchange_eval(position, move)
             : 0;
         list.push_back(ScoredMove{
-            move, move_order_score(position, move, ply, tt_move, captures_only, see), see});
+            move, move_order_score(position, move, ply, tt_move, captures_only,
+                                   see, continuation_rows),
+            see});
     }
 }
 
@@ -389,27 +486,39 @@ void Search::apply_continuation_bonus(std::int16_t& value, int bonus) {
     value = static_cast<std::int16_t>(std::clamp(updated, -MaxHistory, MaxHistory));
 }
 
-int Search::continuation_score(const Position& position, const Move& move, int ply) const {
-    if (ply <= 0 || ply >= MaxPly || move.is_null()) return 0;
+Search::ContinuationRows Search::continuation_rows(int ply) const {
+    ContinuationRows rows{};
+    const auto row_for = [&](int offset,
+                             const std::vector<std::int16_t>& table) {
+        if (ply < offset) return static_cast<const std::int16_t*>(nullptr);
+        const Move previous = move_stack_[ply - offset];
+        const Piece previous_piece = moved_piece_stack_[ply - offset];
+        if (previous.is_null() || previous_piece == Empty) {
+            return static_cast<const std::int16_t*>(nullptr);
+        }
+        const int previous_state =
+            static_cast<int>(previous_piece) * 64 + previous.to;
+        return table.data() + static_cast<std::size_t>(previous_state) *
+                                  HistoryStateCount;
+    };
+    rows[0] = row_for(1, continuation_history_);
+    rows[1] = row_for(2, continuation_history_2_);
+    return rows;
+}
+
+int Search::continuation_score(
+    const Position& position, const Move& move,
+    const ContinuationRows& continuation_rows) {
+    if (move.is_null()) return 0;
     const Piece current_piece = position.piece_at(move.from);
     if (current_piece == Empty) return 0;
     const int current_state = static_cast<int>(current_piece) * 64 + move.to;
-
-    int score = 0;
-    const auto add_score = [&](int offset, const std::vector<std::int16_t>& table,
-                               int weight) {
-        if (ply < offset) return;
-        const Move previous = move_stack_[ply - offset];
-        const Piece previous_piece = moved_piece_stack_[ply - offset];
-        if (previous.is_null() || previous_piece == Empty) return;
-        const int previous_state = static_cast<int>(previous_piece) * 64 + previous.to;
-        const std::size_t index = static_cast<std::size_t>(previous_state) *
-                                  HistoryStateCount + current_state;
-        score += static_cast<int>(table[index]) * weight;
-    };
-    add_score(1, continuation_history_, 2);
-    add_score(2, continuation_history_2_, 1);
-    return score;
+    return (continuation_rows[0] != nullptr
+                ? static_cast<int>(continuation_rows[0][current_state]) * 2
+                : 0) +
+           (continuation_rows[1] != nullptr
+                ? static_cast<int>(continuation_rows[1][current_state])
+                : 0);
 }
 
 void Search::update_quiet_history(const Position& position, Color color,
@@ -552,6 +661,37 @@ int Search::lmr_reduction(int depth, int move_number, bool pv_node, bool improvi
     return std::clamp(reduction, 0, std::max(0, depth - 2));
 }
 
+Move Search::find_quiet_mate(Position& position, int ply) {
+    std::vector<Move>& candidates = generated_moves_[ply];
+    position.generate_pseudo_moves(candidates);
+    std::vector<Move>& replies = generated_moves_[ply + 1];
+
+    for (const Move& move : candidates) {
+        if (should_stop()) return Move::null();
+        if (!is_quiet(move)) continue;
+
+        UndoState undo;
+        if (!position.make_move(move, undo)) continue;
+
+        bool has_legal_reply = true;
+        if (position.in_check(position.side_to_move())) {
+            has_legal_reply = false;
+            position.generate_pseudo_moves(replies);
+            for (const Move& reply : replies) {
+                UndoState reply_undo;
+                if (!position.make_move(reply, reply_undo)) continue;
+                position.unmake_move(reply, reply_undo);
+                has_legal_reply = true;
+                break;
+            }
+        }
+
+        position.unmake_move(move, undo);
+        if (!has_legal_reply) return move;
+    }
+    return Move::null();
+}
+
 int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     if (ply >= MaxPly - 1) return evaluator_.evaluate(position);
     ++nodes_;
@@ -569,6 +709,24 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     const int original_alpha = alpha;
     const std::uint64_t key = position.key();
     const bool rule50_sensitive = position.halfmove_clock() + 8 >= 100;
+
+    // At shallow frontiers, a captures-only qsearch can value a move as winning
+    // while overlooking an immediate quiet mate. Detect only mate-in-one here;
+    // adding general quiet checks would expand quiescence without a firm bound.
+    if (!in_check && ply <= QuietMateScanMaxPly) {
+        const Move quiet_mate = find_quiet_mate(position, ply);
+        if (!quiet_mate.is_null()) {
+            const int mate = MateScore - ply - 1;
+            pv_table_[ply][ply] = quiet_mate;
+            pv_length_[ply] = ply + 1;
+            selective_depth_ = std::max(selective_depth_, ply + 1);
+            if (!rule50_sensitive) {
+                store(key, 0, mate, NoScore, Bound::Exact, quiet_mate, ply);
+            }
+            return mate;
+        }
+    }
+
     Move tt_move = Move::null();
     int tt_static_eval = NoScore;
     int tt_score = NoScore;
@@ -576,13 +734,15 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     if (TTEntry* entry = probe(key)) {
         entry->generation = generation_;
         tt_move = entry->move;
-        tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
-        tt_score = score_from_tt(entry->score, ply);
-        tt_bound = entry->bound;
-        if (!rule50_sensitive && entry->depth >= 0) {
-            if (entry->bound == Bound::Exact) return tt_score;
-            if (entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
-            if (entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
+        if (!verification_search_) {
+            tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
+            tt_score = score_from_tt(entry->score, ply);
+            tt_bound = entry->bound;
+            if (!rule50_sensitive && entry->depth >= 0) {
+                if (entry->bound == Bound::Exact) return tt_score;
+                if (entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
+                if (entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
+            }
         }
     }
 
@@ -617,7 +777,10 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     if (in_check) position.generate_pseudo_moves(pseudo);
     else position.generate_pseudo_captures(pseudo);
 
-    score_moves(position, pseudo, ply, tt_move, !in_check);
+    const ContinuationRows qsearch_continuation =
+        in_check ? continuation_rows(ply) : ContinuationRows{};
+    score_moves(position, pseudo, ply, tt_move, !in_check,
+                qsearch_continuation);
 
     int legal_moves = 0;
     int best = stand_pat;
@@ -629,19 +792,17 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
             [](const ScoredMove& lhs, const ScoredMove& rhs) { return lhs.score < rhs.score; });
         std::iter_swap(ordered.begin() + static_cast<std::ptrdiff_t>(move_index), best_candidate);
         const Move move = ordered[move_index].move;
-        if (!in_check && !move.is_promotion()) {
-            const int optimistic = stand_pat + captured_value(position, move) + 180;
-            if (optimistic <= alpha) continue;
-        }
-
         const int see = !in_check ? ordered[move_index].see : 0;
+        const bool delta_prunable =
+            !in_check && !move.is_promotion() &&
+            stand_pat + captured_value(position, move) + 180 <= alpha;
+        const bool pruning_candidate =
+            !in_check && !move.is_promotion() &&
+            (delta_prunable || see < 0);
+        if (pruning_candidate && !position.gives_check(move)) continue;
+
         UndoState undo;
         if (!position.make_move(move, undo)) continue;
-        const bool gives_check = position.in_check(position.side_to_move());
-        if (!in_check && !move.is_promotion() && !gives_check && see < 0) {
-            position.unmake_move(move, undo);
-            continue;
-        }
         ++legal_moves;
         move_stack_[ply] = move;
         moved_piece_stack_[ply] = position.piece_at(move.to);
@@ -741,14 +902,16 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
     if (TTEntry* entry = probe(key)) {
         entry->generation = generation_;
         tt_move = entry->move;
-        tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
-        tt_score = score_from_tt(entry->score, ply);
-        tt_bound = entry->bound;
-        tt_depth = entry->depth;
-        if (!excluded && !rule50_sensitive && entry->depth >= depth) {
-            if (entry->bound == Bound::Exact) return tt_score;
-            if (!pv_node && entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
-            if (!pv_node && entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
+        if (!verification_search_) {
+            tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
+            tt_score = score_from_tt(entry->score, ply);
+            tt_bound = entry->bound;
+            tt_depth = entry->depth;
+            if (!excluded && !rule50_sensitive && entry->depth >= depth) {
+                if (entry->bound == Bound::Exact) return tt_score;
+                if (!pv_node && entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
+                if (!pv_node && entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
+            }
         }
     }
 
@@ -776,6 +939,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         // without a tactical move, which quiescence will still examine.
         if (depth <= 2 && pruning_eval + 180 + depth * 110 <= alpha) {
             const int razor = quiescence(position, alpha, beta, ply);
+            if (search_aborted()) return alpha;
             if (razor <= alpha) return razor;
         }
 
@@ -803,6 +967,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
             if (depth < 9) return null_score;
             const int verification = alpha_beta(position, depth - reduction, beta - 1, beta,
                                                 ply, false, false, false, previous_move);
+            if (search_aborted()) return alpha;
             if (verification >= beta) return null_score;
         }
     }
@@ -815,7 +980,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         const int probcut_beta = std::min(MateThreshold - 1, beta + ProbCutMargin);
         std::vector<Move>& tactical = generated_moves_[ply];
         position.generate_pseudo_captures(tactical);
-        score_moves(position, tactical, ply, tt_move, true);
+        score_moves(position, tactical, ply, tt_move, true,
+                    ContinuationRows{});
 
         std::vector<ScoredMove>& ordered = move_lists_[ply];
         for (std::size_t move_index = 0; move_index < ordered.size(); ++move_index) {
@@ -834,7 +1000,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
             move_stack_[ply] = move;
             moved_piece_stack_[ply] = position.piece_at(move.to);
             int score = -quiescence(position, -probcut_beta, -probcut_beta + 1, ply + 1);
-            if (score >= probcut_beta) {
+            if (!search_aborted() && score >= probcut_beta) {
                 score = -alpha_beta(position, depth - 4, -probcut_beta,
                                     -probcut_beta + 1, ply + 1,
                                     false, true, true, move);
@@ -863,14 +1029,15 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         const int alternative_score = alpha_beta(position, (depth - 1) / 2,
                                                  singular_beta - 1, singular_beta, ply,
                                                  false, cut_node, false, previous_move, tt_move);
-        if (should_stop()) return alpha;
+        if (search_aborted()) return alpha;
         if (alternative_score < singular_beta) singular_move = tt_move;
         pv_length_[ply] = ply;
     }
 
     std::vector<Move>& pseudo = generated_moves_[ply];
     position.generate_pseudo_moves(pseudo);
-    score_moves(position, pseudo, ply, tt_move, false);
+    const ContinuationRows node_continuation = continuation_rows(ply);
+    score_moves(position, pseudo, ply, tt_move, false, node_continuation);
 
     int legal_moves = 0;
     int quiet_moves = 0;
@@ -893,7 +1060,8 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         const bool quiet = is_quiet(move);
         const int see = quiet ? 0 : ordered[move_index].see;
         const int history_score = quiet
-            ? history_[us][move.from][move.to] + continuation_score(position, move, ply)
+            ? history_[us][move.from][move.to] +
+                  continuation_score(position, move, node_continuation)
             : 0;
 
         UndoState undo;
@@ -908,7 +1076,7 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
         bool prune = false;
         if (!excluded && !pv_node && !in_check && !gives_check && best_score > -MateThreshold) {
             if (quiet) {
-                const int lmp_limit = 3 + depth * depth + (improving ? 3 : 0);
+                const int lmp_limit = 1 + depth * depth + (improving ? 3 : 0);
                 if (depth <= 4 && quiet_moves > lmp_limit) prune = true;
 
                 const int futility_margin = 80 + depth * (improving ? 70 : 95);
@@ -950,11 +1118,11 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
 
             score = -alpha_beta(position, new_depth - reduction, -alpha - 1, -alpha,
                                 ply + 1, false, true, true, move);
-            if (score > alpha && reduction > 0) {
+            if (!search_aborted() && score > alpha && reduction > 0) {
                 score = -alpha_beta(position, new_depth, -alpha - 1, -alpha,
                                     ply + 1, false, !cut_node, true, move);
             }
-            if (score > alpha && score < beta) {
+            if (!search_aborted() && score > alpha && score < beta) {
                 score = -alpha_beta(position, new_depth, -beta, -alpha,
                                     ply + 1, pv_node, false, true, move);
             }
@@ -1039,7 +1207,7 @@ int Search::search_root(Position& position, std::vector<RootMove>& root_moves,
         } else {
             score = -alpha_beta(position, depth - 1, -alpha - 1, -alpha, 1,
                                 false, true, true, root_move.move);
-            if (score > alpha && score < beta) {
+            if (!search_aborted() && score > alpha && score < beta) {
                 score = -alpha_beta(position, depth - 1, -beta, -alpha, 1,
                                     true, false, true, root_move.move);
                 exact_score = true;
@@ -1047,7 +1215,7 @@ int Search::search_root(Position& position, std::vector<RootMove>& root_moves,
         }
 
         position.unmake_move(root_move.move, undo);
-        if (stop_requested_.load(std::memory_order_relaxed)) break;
+        if (search_aborted()) break;
 
         root_move.score = score;
         root_move.exact = exact_score;
@@ -1078,6 +1246,8 @@ int Search::search_root(Position& position, std::vector<RootMove>& root_moves,
 }
 
 void Search::add_book_line(const std::vector<std::string>& moves, int weight) {
+    if (weight <= 0) return;
+
     Position position;
     for (const std::string& text : moves) {
         const Move move = position.parse_uci_move(text);
@@ -1086,8 +1256,14 @@ void Search::add_book_line(const std::vector<std::string>& moves, int weight) {
         auto found = std::find_if(entries.begin(), entries.end(), [&](const BookMove& entry) {
             return entry.move == move;
         });
-        if (found == entries.end()) entries.push_back(BookMove{move, weight});
-        else found->weight += weight;
+        if (found == entries.end()) {
+            entries.push_back(BookMove{move, weight});
+        } else {
+            const std::int64_t combined =
+                static_cast<std::int64_t>(found->weight) + weight;
+            found->weight = static_cast<int>(std::min<std::int64_t>(
+                combined, std::numeric_limits<int>::max()));
+        }
 
         UndoState undo;
         if (!position.make_move(move, undo)) return;
@@ -1160,15 +1336,94 @@ Move Search::select_book_move(const Position& position) {
             [](const BookMove& lhs, const BookMove& rhs) { return lhs.weight < rhs.weight; })->move;
     }
 
-    const double randomness = std::clamp(options_.book_randomness, 0, 100) / 100.0;
-    const double exponent = 1.0 + (1.0 - randomness) * 3.0;
-    std::vector<double> weights;
-    weights.reserve(legal_entries.size());
+    const int randomness = std::clamp(options_.book_randomness, 1, 100);
+    const double exponent = static_cast<double>(400 - 3 * randomness) / 100.0;
+    const auto sampling_weight = [exponent](const BookMove& entry) {
+        return std::pow(static_cast<double>(std::max(1, entry.weight)), exponent);
+    };
+
+    double total_weight = 0.0;
     for (const BookMove& entry : legal_entries) {
-        weights.push_back(std::pow(static_cast<double>(std::max(1, entry.weight)), exponent));
+        total_weight += sampling_weight(entry);
     }
-    std::discrete_distribution<std::size_t> distribution(weights.begin(), weights.end());
-    return legal_entries[distribution(random_)].move;
+    if (!std::isfinite(total_weight) || total_weight <= 0.0) {
+        return std::max_element(legal_entries.begin(), legal_entries.end(),
+            [](const BookMove& lhs, const BookMove& rhs) {
+                return lhs.weight < rhs.weight;
+            })->move;
+    }
+
+    // Use the top 53 generator bits to build an exactly specified [0, 1)
+    // double. This avoids implementation-defined distribution behavior and the
+    // GCC 14 false-positive emitted by std::discrete_distribution's temporary
+    // allocation while retaining the same weighted-book semantics.
+    constexpr double InverseTwoTo53 = 1.0 / 9007199254740992.0;
+    double target = static_cast<double>(random_() >> 11U) *
+                    InverseTwoTo53 * total_weight;
+    for (const BookMove& entry : legal_entries) {
+        const double weight = sampling_weight(entry);
+        if (target < weight) return entry.move;
+        target -= weight;
+    }
+    return legal_entries.back().move;
+}
+
+std::optional<SearchResult> Search::confirm_human_candidate(
+    const Position& position, const Move& candidate, int completed_depth) {
+    if (candidate.is_null() || completed_depth <= 0 || should_stop(true)) {
+        return std::nullopt;
+    }
+
+    EngineOptions verifier_options = options_;
+    verifier_options.hash_mb = 1;
+    verifier_options.use_book = false;
+    verifier_options.uci_limit_strength = false;
+    verifier_options.human_style = false;
+    verifier_options.human_skill = 20;
+
+    Search verifier(evaluator_, verifier_options);
+    if (should_stop(true)) return std::nullopt;
+    verifier.set_options(verifier_options);
+    if (should_stop(true)) return std::nullopt;
+    SearchLimits verifier_limits;
+    verifier_limits.depth = completed_depth;
+    verifier_limits.search_moves_specified = true;
+    verifier_limits.search_moves.push_back(candidate);
+    verifier_limits.external_stops.reserve(limits_.external_stops.size() + 1);
+    verifier_limits.external_stops.push_back(&stop_requested_);
+    verifier_limits.external_stops.insert(
+        verifier_limits.external_stops.end(),
+        limits_.external_stops.begin(),
+        limits_.external_stops.end());
+    std::optional<std::chrono::steady_clock::time_point> verifier_deadline;
+    if (has_hard_deadline_) verifier_deadline = hard_deadline_;
+    if (limits_.external_deadline != nullptr &&
+        (!verifier_deadline.has_value() ||
+         *limits_.external_deadline < *verifier_deadline)) {
+        verifier_deadline = *limits_.external_deadline;
+    }
+    if (verifier_deadline.has_value()) {
+        verifier_limits.external_deadline = &*verifier_deadline;
+    }
+    std::uint64_t verifier_node_budget = 0;
+    if (limits_.node_limit != 0) {
+        verifier_node_budget = limits_.node_limit -
+            std::min(nodes_, limits_.node_limit);
+        if (verifier_node_budget == 0) return std::nullopt;
+        verifier_limits.node_limit = verifier_node_budget;
+    }
+
+    SearchResult result = verifier.think(position, verifier_limits);
+    const bool verifier_overran_parent = verifier_node_budget != 0 &&
+        result.nodes > verifier_node_budget;
+    nodes_ += verifier_overran_parent ? verifier_node_budget : result.nodes;
+    selective_depth_ = std::max(selective_depth_, result.selective_depth);
+    if (verifier_overran_parent || should_stop(true) ||
+        result.depth != completed_depth ||
+        result.best != candidate) {
+        return std::nullopt;
+    }
+    return result;
 }
 
 Move Search::select_human_move(const Position& position, std::vector<RootMove>& root_moves,
@@ -1178,52 +1433,73 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
                                                               const RootMove& rhs) {
         return lhs.score > rhs.score;
     });
-    if (!options_.human_style || root_moves.size() == 1 || completed_depth < 2 ||
+    const HumanSettings human = resolved_human_settings(options_);
+    if (!human.enabled || !selection_opportunity_ || root_moves.size() == 1 ||
+        completed_depth < 2 ||
         std::abs(root_moves.front().score) >= MateThreshold || should_stop(true)) {
         // Never randomise a proven mate (or a forced-mate defence). Root PVS
         // bounds for unsearched alternatives are not reliable enough to safely
         // distinguish equivalent mate lines here.
         return root_moves.front().move;
     }
+    if (limits_.ponder && !ponder_time_activated_) {
+        // A bounded ponder can finish before ponderhit. Without an activated
+        // clock, a nested confirmation would have no deadline to inherit.
+        return root_moves.front().move;
+    }
 
-    const int skill = std::clamp(options_.human_skill, 0, 20);
+    const int skill = human.skill;
     const int skill_gap = 20 - skill;
-    const int allowance = std::clamp(options_.human_max_loss_cp + skill_gap * 8 +
-                                     skill_gap * skill_gap * 2, 0, 700);
+    const int allowance = human_loss_allowance(human);
     const int best_score = root_moves.front().score;
     const int threshold = best_score - allowance;
     const double temperature = std::max(3.0, 4.0 + skill_gap * 3.5);
     const std::size_t candidate_limit = std::min<std::size_t>(
         root_moves.size(), static_cast<std::size_t>(6 + skill_gap));
 
-    // PVS gives fail-low bounds for most non-best root moves. Before allowing an
-    // alternative, verify it with a narrow window at the completed depth. This
-    // prevents a bound tied with mate (or another very high alpha) from being
-    // mistaken for an equally good move.
-    const std::size_t verification_limit = std::min<std::size_t>(root_moves.size(), 10);
-    for (std::size_t index = 1; index < verification_limit; ++index) {
-        RootMove& candidate = root_moves[index];
-        if (candidate.score < threshold || candidate.exact || should_stop(true)) continue;
-
-        Position copy = position;
-        UndoState undo;
-        if (!copy.make_move(candidate.move, undo)) {
-            candidate.score = NoScore;
-            continue;
+    // PVS and aspiration windows can leave bounds on every non-best root move.
+    // Use a cheap narrow search to filter the weighted pool. Any sampled
+    // alternative is then confirmed by a fresh restricted iterative search
+    // before it can be returned.
+    std::vector<bool> eligible(candidate_limit, false);
+    eligible.front() = true;
+    if (selection_budget_reserved_) {
+        // Root PVS scores are provisional here. Sample from plausible moves and
+        // spend the reserved budget on the one fresh search that can admit it.
+        for (std::size_t index = 1; index < candidate_limit; ++index) {
+            const RootMove& candidate = root_moves[index];
+            eligible[index] = candidate.score != NoScore && candidate.score >= threshold;
         }
-        const int prior_score = candidate.score;
-        const int verified = -alpha_beta(copy, completed_depth - 1,
-                                         -threshold - 1, -threshold, 1,
-                                         false, true, true, candidate.move);
-        if (verified <= threshold) {
-            candidate.score = verified;
-            candidate.exact = true;
-        } else {
-            // The narrow verification proves that the move is inside the allowed
-            // loss band but does not determine its exact score. Preserve the
-            // more informative root estimate instead of flattening every passing
-            // candidate to threshold + 1.
-            candidate.score = std::max(prior_score, threshold + 1);
+    } else {
+        for (std::size_t index = 1; index < candidate_limit; ++index) {
+            RootMove& candidate = root_moves[index];
+            if (eligible[index] || candidate.score == NoScore ||
+                candidate.score < threshold) {
+                continue;
+            }
+            if (should_stop(true)) break;
+
+            Position copy = position;
+            UndoState undo;
+            if (!copy.make_move(candidate.move, undo)) {
+                candidate.score = NoScore;
+                continue;
+            }
+            move_stack_[0] = candidate.move;
+            moved_piece_stack_[0] = copy.piece_at(candidate.move.to);
+            const int prior_score = candidate.score;
+            verification_search_ = true;
+            const int verified = -alpha_beta(copy, completed_depth - 1,
+                                             -threshold, -threshold + 1, 1,
+                                             true, false, true, candidate.move);
+            verification_search_ = false;
+            if (search_aborted()) break;
+            if (verified < threshold) {
+                candidate.score = verified;
+                continue;
+            }
+            candidate.score = std::max(prior_score, threshold);
+            eligible[index] = true;
         }
     }
 
@@ -1231,7 +1507,7 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     std::vector<double> weights;
     for (std::size_t index = 0; index < candidate_limit; ++index) {
         const RootMove& move = root_moves[index];
-        if (move.score == NoScore || move.score < threshold) continue;
+        if (!eligible[index]) continue;
         candidates.push_back(index);
         const int weighted_score = std::min(best_score, move.score);
         const double eval_term = std::exp((weighted_score - best_score) / temperature);
@@ -1242,12 +1518,33 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     }
     if (candidates.size() <= 1) return root_moves.front().move;
 
-    std::discrete_distribution<std::size_t> distribution(weights.begin(), weights.end());
-    return root_moves[candidates[distribution(random_)]].move;
+    const int max_confirmations = selection_budget_reserved_ ? 1 : 3;
+    for (int attempt = 0;
+         attempt < max_confirmations && candidates.size() > 1;
+         ++attempt) {
+        std::discrete_distribution<std::size_t> distribution(
+            weights.begin(), weights.end());
+        const std::size_t slot = distribution(random_);
+        const std::size_t index = candidates[slot];
+        if (index == 0) return root_moves.front().move;
+
+        const std::optional<SearchResult> confirmed = confirm_human_candidate(
+            position, root_moves[index].move, completed_depth);
+        if (!confirmed.has_value()) return root_moves.front().move;
+        root_moves[index].score = confirmed->score_cp;
+        root_moves[index].exact = true;
+        root_moves[index].pv = confirmed->pv;
+        if (confirmed->score_cp >= threshold) return root_moves[index].move;
+
+        candidates.erase(candidates.begin() + static_cast<std::ptrdiff_t>(slot));
+        weights.erase(weights.begin() + static_cast<std::ptrdiff_t>(slot));
+    }
+    return root_moves.front().move;
 }
 
 SearchResult Search::think(Position position, const SearchLimits& limits,
-                           const InfoCallback& callback) {
+                           const InfoCallback& callback,
+                           const StartCallback& start_callback) {
     searching_.store(true, std::memory_order_relaxed);
     struct SearchingGuard {
         std::atomic<bool>& flag;
@@ -1255,7 +1552,18 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     } guard{searching_};
 
     stop_requested_.store(false, std::memory_order_relaxed);
+    if (start_callback) start_callback();
     limits_ = limits;
+    main_node_limit_ = 0;
+    main_budget_exhausted_ = false;
+    selection_budget_reserved_ = false;
+    selection_opportunity_ = false;
+    const HumanSettings active_human = resolved_human_settings(options_);
+    selection_opportunity_ = human_selection_opportunity(active_human, random_);
+    main_phase_ = selection_opportunity_ && human_loss_allowance(active_human) > 0;
+    if (main_phase_ && limits_.node_limit != 0) {
+        main_node_limit_ = std::max<std::uint64_t>(1, limits_.node_limit / 2);
+    }
     if (!limits_.ponder) {
         ponder_state_.store(PonderState::Inactive, std::memory_order_release);
     } else if (ponder_state_.load(std::memory_order_acquire) == PonderState::Inactive) {
@@ -1270,6 +1578,11 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     selective_depth_ = 0;
     start_time_ = std::chrono::steady_clock::now();
     configure_time(position);
+    selection_budget_reserved_ = main_phase_ &&
+        (main_node_limit_ != 0 || hard_time_budget_ms_ > 0);
+    main_phase_ = selection_budget_reserved_;
+    // configure_time() may have created this from the provisional main phase.
+    if (!selection_budget_reserved_) has_main_deadline_ = false;
     ++generation_;
     if (generation_ == 0) ++generation_;
 
@@ -1297,7 +1610,9 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
 
     const bool timed_play = limits_.movetime_ms > 0 || limits_.white_time_ms > 0 ||
                             limits_.black_time_ms > 0;
-    if (options_.use_book && timed_play && position.fullmove_number() <= 12 &&
+    const bool human_limited = resolved_human_settings(options_).enabled;
+    if (options_.use_book && !human_limited && timed_play &&
+        position.fullmove_number() <= 12 &&
         limits_.node_limit == 0 && !limits_.infinite && !limits_.search_moves_specified) {
         const Move book_move = select_book_move(position);
         if (!book_move.is_null()) {
@@ -1351,7 +1666,7 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
         while (!should_stop(true)) {
             pv_length_[0] = 0;
             score = search_root(position, root_moves, depth, alpha, beta);
-            if (stop_requested_.load(std::memory_order_relaxed)) break;
+            if (search_aborted()) break;
 
             if (score <= alpha) {
                 delta = std::min(4096, delta * 2);
@@ -1396,6 +1711,9 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
             if (now - start_time_ >= total * 3 / 4) break;
         }
     }
+
+    main_phase_ = false;
+    main_budget_exhausted_ = false;
 
     if (completed_depth == 0) {
         // A stop can arrive before depth one finishes. Root moves are already

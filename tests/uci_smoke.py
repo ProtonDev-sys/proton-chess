@@ -78,6 +78,128 @@ class EngineProcess:
             raise AssertionError(f"engine exited with {self.process.returncode}: {stderr}")
 
 
+def check_immediate_stop(binary: Path) -> None:
+    """Exercise cancellation before the search worker can emit any output."""
+    commands = ["uci", "isready"]
+    normal_searches = 16
+    ponder_searches = 4
+    for _ in range(normal_searches):
+        commands.extend(("position startpos", "go infinite", "stop"))
+    for _ in range(ponder_searches):
+        commands.extend(("position startpos", "go ponder infinite", "stop"))
+    commands.append("quit")
+
+    try:
+        result = subprocess.run(
+            [str(binary)],
+            input="\n".join(commands) + "\n",
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError("immediate stop did not terminate the search worker") from error
+
+    assert result.returncode == 0, result.stderr
+    bestmoves = [line for line in result.stdout.splitlines() if line.startswith("bestmove ")]
+    expected = normal_searches + ponder_searches
+    assert len(bestmoves) == expected, (len(bestmoves), result.stdout)
+    assert all(line.split()[1] != "0000" for line in bestmoves), bestmoves
+
+
+def fixed_depth_move(binary: Path, options: list[str]) -> str:
+    engine = EngineProcess(binary)
+    try:
+        engine.send("uci")
+        engine.wait_for(lambda line: line == "uciok")
+        engine.send("isready")
+        engine.wait_for(lambda line: line == "readyok")
+        for option in options:
+            engine.send(option)
+        engine.send("position startpos")
+        engine.send("go depth 4")
+        bestmove, _ = engine.wait_for(
+            lambda line: line.startswith("bestmove "), timeout=10
+        )
+        return bestmove.split()[1]
+    finally:
+        engine.close()
+
+
+def check_limiter_option_state(binary: Path) -> None:
+    seed = "setoption name HumanSeed value 27"
+    fresh = fixed_depth_move(binary, [seed])
+    replayed_defaults = fixed_depth_move(binary, [
+        "setoption name Hash value 64",
+        "setoption name Threads value 1",
+        "setoption name UseBook value true",
+        "setoption name BookFile value openings/book_lines.txt",
+        "setoption name BookRandomness value 0",
+        "setoption name UCI_LimitStrength value false",
+        "setoption name UCI_Elo value 2800",
+        "setoption name Skill Level value 20",
+        "setoption name HumanStyle value false",
+        "setoption name HumanSkill value 20",
+        "setoption name HumanMaxLossCp value 12",
+        "setoption name HumanVariety value 35",
+        "setoption name HumanSeed value 0",
+        "setoption name MoveOverhead value 25",
+        "setoption name Contempt value 0",
+        seed,
+    ])
+    skill_round_trip = fixed_depth_move(binary, [
+        "setoption name HumanSkill value 0",
+        "setoption name HumanSkill value 20",
+        seed,
+    ])
+    disabled_uci_elo = fixed_depth_move(binary, [
+        "setoption name UCI_Elo value 800",
+        seed,
+    ])
+    zero_variety = fixed_depth_move(binary, [
+        "setoption name HumanStyle value true",
+        "setoption name HumanSkill value 0",
+        "setoption name HumanMaxLossCp value 250",
+        "setoption name HumanVariety value 0",
+        seed,
+    ])
+    assert replayed_defaults == fresh, (fresh, replayed_defaults)
+    assert skill_round_trip == fresh, (fresh, skill_round_trip)
+    assert disabled_uci_elo == fresh, (fresh, disabled_uci_elo)
+    assert zero_variety == fresh, (fresh, zero_variety)
+
+    custom = [
+        "setoption name HumanStyle value true",
+        "setoption name HumanSkill value 0",
+        "setoption name HumanMaxLossCp value 250",
+        "setoption name HumanVariety value 100",
+    ]
+    sensitivity_exercised = False
+    for seed_value in (1, 7, 27, 42, 99):
+        custom_seed = f"setoption name HumanSeed value {seed_value}"
+        custom_move = fixed_depth_move(binary, custom + [custom_seed])
+        overwritten_move = fixed_depth_move(binary, [
+            "setoption name HumanStyle value true",
+            "setoption name HumanSkill value 20",
+            "setoption name HumanMaxLossCp value 8",
+            "setoption name HumanVariety value 100",
+            custom_seed,
+        ])
+        after_disabled_uci_elo = fixed_depth_move(
+            binary,
+            custom + ["setoption name UCI_Elo value 2800", custom_seed],
+        )
+        assert after_disabled_uci_elo == custom_move, (
+            seed_value,
+            custom_move,
+            after_disabled_uci_elo,
+        )
+        sensitivity_exercised = sensitivity_exercised or (
+            custom_move != fresh and custom_move != overwritten_move
+        )
+    assert sensitivity_exercised
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: uci_smoke.py /path/to/proton_chess", file=sys.stderr)
@@ -87,6 +209,9 @@ def main() -> int:
     if not binary.is_file():
         raise FileNotFoundError(binary)
 
+    check_immediate_stop(binary)
+    check_limiter_option_state(binary)
+
     engine = EngineProcess(binary)
     try:
         engine.send("uci")
@@ -94,6 +219,10 @@ def main() -> int:
         assert any("option name Threads type spin default 1 min 1 max 1" in line
                    for line in uci_lines)
         assert any("option name BookRandomness type spin default 0 min 0 max 100" in line
+                   for line in uci_lines)
+        assert any("option name UCI_Elo type spin default 2800 min 800 max 3000" in line
+                   for line in uci_lines)
+        assert any("option name HumanVariety type spin default 35 min 0 max 100" in line
                    for line in uci_lines)
         assert not any("option name Backend" in line for line in uci_lines)
         assert not any("option name SyzygyPath" in line for line in uci_lines)
@@ -113,6 +242,21 @@ def main() -> int:
         engine.send("d")
         after_invalid, _ = engine.wait_for(lambda line: line.startswith("info string fen "))
         assert after_invalid == expected, after_invalid
+
+        engine.send("position startpos")
+        engine.send("moves")
+        engine.send("isready")
+        _, move_lines = engine.wait_for(lambda line: line == "readyok")
+        legal_moves = sorted(line for line in move_lines if len(line) in (4, 5))
+        assert legal_moves == [
+            "a2a3", "a2a4", "b1a3", "b1c3", "b2b3", "b2b4", "c2c3", "c2c4",
+            "d2d3", "d2d4", "e2e3", "e2e4", "f2f3", "f2f4", "g1f3", "g1h3",
+            "g2g3", "g2g4", "h2h3", "h2h4",
+        ], legal_moves
+
+        engine.send("perft 2")
+        perft_line, _ = engine.wait_for(lambda line: line.startswith("info string perft "))
+        assert "depth 2 nodes 400 " in perft_line, perft_line
 
         engine.send("position startpos")
         engine.send("go depth 4 searchmoves e2e4")

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(proton_chess VERSION 0.3.0 LANGUAGES CXX)
+project(proton_chess VERSION 0.3.1 LANGUAGES CXX)
 
 option(PROTON_NATIVE "Tune release builds for the current CPU" OFF)
 option(PROTON_LTO "Enable link-time optimisation when supported" ON)
@@ -67,22 +67,62 @@ if(PROTON_BUILD_TESTS)
     target_link_libraries(proton-tests PRIVATE proton_engine)
     add_test(NAME proton-tests COMMAND proton-tests)
 
+    add_executable(proton-human-policy-tests tests/test_human_policy.cpp)
+    target_link_libraries(proton-human-policy-tests PRIVATE proton_engine)
+    add_test(NAME proton-human-policy-tests COMMAND proton-human-policy-tests)
+
+    add_executable(proton-threat-eval-tests tests/test_threat_eval.cpp)
+    target_link_libraries(proton-threat-eval-tests PRIVATE proton_engine)
+    add_test(NAME proton-threat-eval-tests COMMAND proton-threat-eval-tests)
+
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         add_test(NAME proton-uci-smoke
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/uci_smoke.py
                          $<TARGET_FILE:proton_chess>)
         set_tests_properties(proton-uci-smoke PROPERTIES TIMEOUT 20)
-        execute_process(COMMAND ${Python3_EXECUTABLE} -c "import chess"
-                        RESULT_VARIABLE PROTON_PYTHON_CHESS_STATUS
-                        OUTPUT_QUIET ERROR_QUIET)
-        if(PROTON_PYTHON_CHESS_STATUS EQUAL 0)
+
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import chess"
+            RESULT_VARIABLE PROTON_PYTHON_CHESS_AVAILABLE
+            OUTPUT_QUIET ERROR_QUIET)
+        if(PROTON_PYTHON_CHESS_AVAILABLE EQUAL 0)
             add_test(NAME proton-match-tools
                      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_match_tools.py)
             add_test(NAME proton-differential-perft
                      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/differential_perft.py
                              $<TARGET_FILE:proton_chess>)
             set_tests_properties(proton-differential-perft PROPERTIES TIMEOUT 30)
+            add_test(NAME proton-match-tool-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_estimate_elo.py)
+            set_tests_properties(proton-match-tool-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-uho-suite-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_prepare_uho_suite.py)
+            set_tests_properties(proton-uho-suite-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-match-protocol-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_match_protocol.py)
+            set_tests_properties(proton-match-protocol-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-match-result-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_check_match_result.py)
+            set_tests_properties(proton-match-result-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-ab-tool-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compare_engines.py)
+            set_tests_properties(proton-ab-tool-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-search-compare-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compare_search.py)
+            set_tests_properties(proton-search-compare-tests PROPERTIES TIMEOUT 20)
+            add_test(NAME proton-stockfish-calibration-tests
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_stockfish_calibration.py)
+            set_tests_properties(proton-stockfish-calibration-tests PROPERTIES TIMEOUT 20)
+        else()
+            message(STATUS "python-chess not found; match-tool tests are disabled")
         endif()
     endif()
 endif()
