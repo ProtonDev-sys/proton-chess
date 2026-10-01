@@ -103,7 +103,8 @@ otherwise idle machine; fixed-node or fixed-depth timing is not a strength test.
 Builds, downloads, caches, and full match output stay outside tracked source.
 Keep baseline binaries and experiment records as local recovery/evidence rather
 than committing generated artifacts. The measured iteration report belongs in
-`docs/strength-2026-10-01.md`.
+`docs/strength-integrated-2026-10-01.md`. Historical pre-integration experiments
+remain in `docs/strength-2026-10-01.md`; they are not the current binary's results.
 
 ## Additional engine controls and protocols
 

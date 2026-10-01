@@ -1,0 +1,313 @@
+{
+  "date": "2026-10-01",
+  "source_commit": "02a2131",
+  "upstream_commit": "5442524",
+  "version": "0.3.1",
+  "hardware": "AMD Ryzen 7 9800X3D, 8 cores / 16 logical processors",
+  "build": "MSVC 19.44 Release LTO PROTON_NATIVE=ON AVX2",
+  "candidate": {
+    "sha256": "9f3de1ead664acedcbac8c0f910927c74f3a643d5392862c40d75e4e1c475b23",
+    "id": {
+      "name": "Proton Chess 0.3.1",
+      "author": "ProtonDev-sys"
+    },
+    "configured_options": {
+      "Hash": 64,
+      "Threads": 1,
+      "UseBook": false,
+      "UCI_LimitStrength": false,
+      "Skill Level": 20,
+      "HumanStyle": false,
+      "MoveOverhead": 1
+    }
+  },
+  "stockfish": {
+    "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0",
+    "id": {
+      "name": "Stockfish 19",
+      "author": "the Stockfish developers (see AUTHORS file)"
+    },
+    "configured_options": {
+      "Hash": 64,
+      "Threads": 1,
+      "UCI_LimitStrength": false,
+      "Skill Level": 20,
+      "Move Overhead": 1
+    }
+  },
+  "stockfish_release": {
+    "tag": "sf_19",
+    "published_at": "2026-09-05T08:33:17Z",
+    "latest_verified_on": "2026-10-01"
+  },
+  "validation": {
+    "portable_ctest": "12/13 targets passed; two assertions fail within proton-tests",
+    "native_ctest": "12/13 targets passed; same two assertions",
+    "exact_upstream_reproduction": "Both failures also reproduce in an independent unmodified origin/main native build",
+    "failures": [
+      "a seeded rare Elo 3000 opportunity exercises a real alternative",
+      "exhausted confirmation falls back to the completed root best"
+    ],
+    "differential_perft": [
+      {
+        "positions": 1000,
+        "depth": 2,
+        "seed": 20261001
+      },
+      {
+        "positions": 128,
+        "depth": 3,
+        "seed": 20261002
+      }
+    ],
+    "replayed_pgn_games": 960
+  },
+  "runs": {
+    "merged-confirm-2200-100ms": {
+      "settings": {
+        "games": 400,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 6,
+        "seed": 20261013,
+        "confidence": 0.975,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "status": "completed",
+      "elapsed_seconds": 686.36,
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 400,
+          "pairs": 200,
+          "wins": 254,
+          "draws": 73,
+          "losses": 73,
+          "unresolved": 0,
+          "completed_score": 0.72625,
+          "pessimistic_score": 0.72625,
+          "confidence": 0.975,
+          "score_lower_one_sided": 0.6302177208680079,
+          "score_upper_one_sided": 0.822282279131992,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "opponent_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+    },
+    "merged-confirm-2200-250ms": {
+      "settings": {
+        "games": 200,
+        "move_time": 0.25,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261014,
+        "confidence": 0.975,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "status": "completed",
+      "elapsed_seconds": 1161.953,
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 200,
+          "pairs": 100,
+          "wins": 141,
+          "draws": 24,
+          "losses": 35,
+          "unresolved": 0,
+          "completed_score": 0.765,
+          "pessimistic_score": 0.765,
+          "confidence": 0.975,
+          "score_lower_one_sided": 0.6291898484259381,
+          "score_upper_one_sided": 0.900810151574062,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "opponent_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+    },
+    "merged-ladder": {
+      "settings": {
+        "games": 40,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261015,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "status": "completed",
+      "elapsed_seconds": 757.656,
+      "results": [
+        {
+          "opponent_elo": 1600,
+          "games": 40,
+          "pairs": 20,
+          "wins": 39,
+          "draws": 1,
+          "losses": 0,
+          "unresolved": 0,
+          "completed_score": 0.9875,
+          "pessimistic_score": 0.9875,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.7138335847444014,
+          "score_upper_one_sided": 1.0,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        },
+        {
+          "opponent_elo": 2000,
+          "games": 40,
+          "pairs": 20,
+          "wins": 33,
+          "draws": 3,
+          "losses": 4,
+          "unresolved": 0,
+          "completed_score": 0.8625,
+          "pessimistic_score": 0.8625,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.5888335847444014,
+          "score_upper_one_sided": 1.0,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        },
+        {
+          "opponent_elo": 2400,
+          "games": 40,
+          "pairs": 20,
+          "wins": 23,
+          "draws": 9,
+          "losses": 8,
+          "unresolved": 0,
+          "completed_score": 0.6875,
+          "pessimistic_score": 0.6875,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.41383358474440135,
+          "score_upper_one_sided": 0.9611664152555986,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        },
+        {
+          "opponent_elo": 2800,
+          "games": 40,
+          "pairs": 20,
+          "wins": 2,
+          "draws": 16,
+          "losses": 22,
+          "unresolved": 0,
+          "completed_score": 0.25,
+          "pessimistic_score": 0.25,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.0,
+          "score_upper_one_sided": 0.5236664152555986,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "opponent_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+    },
+    "merged-full-stockfish": {
+      "settings": {
+        "games": 40,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261016,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "status": "completed",
+      "elapsed_seconds": 145.125,
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 40,
+          "pairs": 20,
+          "wins": 0,
+          "draws": 3,
+          "losses": 37,
+          "unresolved": 0,
+          "completed_score": 0.0375,
+          "pessimistic_score": 0.0375,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.0,
+          "score_upper_one_sided": 0.3111664152555986,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "opponent_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+    },
+    "merged-v-upstream": {
+      "settings": {
+        "games": 160,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261017,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "status": "completed",
+      "elapsed_seconds": 1017.984,
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 160,
+          "pairs": 80,
+          "wins": 52,
+          "draws": 58,
+          "losses": 50,
+          "unresolved": 0,
+          "completed_score": 0.50625,
+          "pessimistic_score": 0.50625,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.36941679237220065,
+          "score_upper_one_sided": 0.6430832076277992,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "opponent_sha256": "9696c894e5c45734606041ae97d26d416768bb6b49ea4c8f04db8a1956ee7a9c"
+    }
+  },
+  "benchmarks": [
+    {
+      "position": "startpos",
+      "nodes": 493804,
+      "portable_median_ms": 309,
+      "native_median_ms": 269,
+      "speed_ratio": 1.1486988847583643
+    },
+    {
+      "position": "kiwipete",
+      "nodes": 548701,
+      "portable_median_ms": 476,
+      "native_median_ms": 421,
+      "speed_ratio": 1.1306413301662708
+    },
+    {
+      "position": "endgame",
+      "nodes": 156264,
+      "portable_median_ms": 60,
+      "native_median_ms": 54,
+      "speed_ratio": 1.1111111111111112
+    }
+  ]
+}
