@@ -89,14 +89,17 @@ inline constexpr std::array<std::array<Bitboard, 64>, 8> Rays = make_ray_table()
 }
 
 [[nodiscard]] inline Bitboard ray(int direction, int square, Bitboard occupied) {
-    Bitboard result = Rays[direction][square];
+    const Bitboard result = Rays[direction][square];
     const Bitboard blockers = result & occupied;
-    if (blockers == 0) return result;
+    if (RayDirections[direction] > 0) {
+        // b ^ (b - 1) retains every bit through the least significant blocker.
+        // Unsigned wraparound makes b == 0 yield all ones, i.e. the full ray.
+        return result & (blockers ^ (blockers - 1));
+    }
 
-    const bool increasing = RayDirections[direction] > 0;
-    const int blocker = increasing
-        ? static_cast<int>(std::countr_zero(blockers))
-        : 63 - static_cast<int>(std::countl_zero(blockers));
+    // Bit zero is a sentinel: every decreasing ray from square zero is empty.
+    // It removes the empty-ray branch and keeps the bit scan defined at zero.
+    const int blocker = 63 - static_cast<int>(std::countl_zero(blockers | 1ULL));
     return result ^ Rays[direction][blocker];
 }
 
