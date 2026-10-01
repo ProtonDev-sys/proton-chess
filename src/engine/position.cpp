@@ -635,21 +635,6 @@ void Position::generate_legal_moves(std::vector<Move>& moves) const {
     }
 }
 
-void Position::generate_captures(std::vector<Move>& moves) const {
-    std::vector<Move> pseudo;
-    generate_pseudo_legal_moves(pseudo, true);
-    moves.clear();
-    moves.reserve(pseudo.size());
-    Position copy = *this;
-    for (const Move& move : pseudo) {
-        UndoState undo;
-        if (copy.make_move(move, undo)) {
-            moves.push_back(move);
-            copy.unmake_move(move, undo);
-        }
-    }
-}
-
 Move Position::parse_uci_move(const std::string& text) const {
     if (text.size() < 4 || text.size() > 5) return Move::null();
     std::vector<Move> legal;

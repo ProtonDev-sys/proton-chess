@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(proton_chess VERSION 0.3.1 LANGUAGES CXX)
+project(proton_chess VERSION 0.3.2 LANGUAGES CXX)
 
 option(PROTON_NATIVE "Tune release builds for the current CPU" OFF)
 option(PROTON_LTO "Enable link-time optimisation when supported" ON)
@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 
 add_library(proton_engine
+    src/engine/attacks.cpp
     src/engine/eval.cpp
     src/engine/position.cpp
     src/engine/search.cpp
@@ -22,6 +23,9 @@ add_library(proton_engine
 target_include_directories(proton_engine PUBLIC src)
 target_compile_definitions(proton_engine PRIVATE PROTON_VERSION="${PROJECT_VERSION}")
 target_link_libraries(proton_engine PUBLIC Threads::Threads)
+if(PROTON_NATIVE)
+    target_compile_definitions(proton_engine PUBLIC $<$<CONFIG:Release>:PROTON_NATIVE_ATTACKS>)
+endif()
 
 if(MSVC)
     target_compile_options(proton_engine PRIVATE /W4 /permissive- /EHsc)

@@ -35,6 +35,13 @@ MSVC native builds require AVX2. GCC/Clang native builds target the build machin
 and may not run on other CPUs. The default build remains portable. For GCC/Clang
 debugging, `-DPROTON_SANITIZERS=ON -DPROTON_LTO=OFF` enables ASan and UBSan.
 
+Native release builds use occupancy-indexed sliding attacks when compiled with
+BMI2 intrinsics and the running CPU reports BMI2 support. Otherwise the existing
+portable ray implementation is used. Both paths are checked against an independent
+directional reference over every relevant occupancy subset. Neural/GPU placeholder
+classes and unused option storage are removed; legacy unsupported UCI option
+names still receive an explicit inactive/not-implemented response.
+
 ## Play
 
 Add the executable to a UCI-compatible chess GUI. Run from this directory to use

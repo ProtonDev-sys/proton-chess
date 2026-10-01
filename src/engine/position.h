@@ -43,7 +43,6 @@ public:
     [[nodiscard]] bool has_non_pawn_material(Color color) const;
 
     void generate_legal_moves(std::vector<Move>& moves) const;
-    void generate_captures(std::vector<Move>& moves) const;
     void generate_pseudo_moves(std::vector<Move>& moves) const;
     void generate_pseudo_captures(std::vector<Move>& moves) const;
     [[nodiscard]] Move parse_uci_move(const std::string& text) const;

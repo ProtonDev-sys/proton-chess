@@ -292,13 +292,13 @@ int king_safety(const Position& position, Color color,
 
 }  // namespace
 
-CoreEvalNet::CoreEvalNet() : pawn_cache_(1U << 14) {}
+StaticEvaluator::StaticEvaluator() : pawn_cache_(1U << 14) {}
 
-void CoreEvalNet::clear_cache() {
+void StaticEvaluator::clear_cache() {
     for (PawnCacheEntry& entry : pawn_cache_) entry.valid = false;
 }
 
-const CoreEvalNet::PawnCacheEntry& CoreEvalNet::pawn_info(
+const StaticEvaluator::PawnCacheEntry& StaticEvaluator::pawn_info(
     const Position& position) const {
     const std::size_t index = static_cast<std::size_t>(position.pawn_key()) &
                               (pawn_cache_.size() - 1);
@@ -374,7 +374,7 @@ const CoreEvalNet::PawnCacheEntry& CoreEvalNet::pawn_info(
     return entry;
 }
 
-int CoreEvalNet::evaluate(const Position& position) const {
+int StaticEvaluator::evaluate(const Position& position) const {
     const PawnCacheEntry& pawn = pawn_info(position);
     int mg = pawn.mg;
     int eg = pawn.eg;
@@ -543,26 +543,9 @@ int CoreEvalNet::evaluate(const Position& position) const {
     return position.side_to_move() == White ? score : -score;
 }
 
-DeepEvalNet::DeepEvalNet(Backend backend) : backend_(backend) {}
-
-bool DeepEvalNet::available() const {
-    // Do not advertise a neural/GPU evaluator until a real network loader and
-    // validated inference path are present.
-    return false;
-}
-
-int DeepEvalNet::evaluate(const Position&) const { return 0; }
-
-std::vector<float> DeepEvalNet::score_moves(
-    const Position&, const std::vector<Move>& moves) const {
-    return std::vector<float>(moves.size(), 0.0F);
-}
-
 Evaluator::Evaluator() : cache_(1U << 16) {}
 
-void Evaluator::set_options(const EngineOptions& options) {
-    options_ = options;
-    deep_ = DeepEvalNet(options.backend);
+void Evaluator::set_options(const EngineOptions&) {
     clear_cache();
 }
 
@@ -571,14 +554,13 @@ void Evaluator::clear_cache() {
     core_.clear_cache();
 }
 
-int Evaluator::evaluate(const Position& position, bool deep_hint) const {
+int Evaluator::evaluate(const Position& position) const {
     const std::size_t index =
         static_cast<std::size_t>(position.key()) & (cache_.size() - 1);
     CacheEntry& entry = cache_[index];
     if (entry.valid && entry.key == position.key()) return entry.score;
 
-    int score = core_.evaluate(position);
-    if (deep_hint && deep_.available()) score += deep_.evaluate(position);
+    const int score = core_.evaluate(position);
     entry.key = position.key();
     entry.score = score;
     entry.valid = true;
@@ -673,7 +655,5 @@ std::vector<float> Evaluator::policy_scores(
     }
     return scores;
 }
-
-bool Evaluator::deep_available() const { return deep_.available(); }
 
 }  // namespace proton

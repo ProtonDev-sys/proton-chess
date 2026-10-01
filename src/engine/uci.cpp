@@ -196,21 +196,21 @@ void UciLoop::handle_setoption(const std::string& line) {
     } else if (key == "clear hash") {
         search_.new_game();
     } else if (key == "threads" && parse_int(value, number)) {
-        options_.threads = 1;
+        changed = false;
         if (number != 1) print_line("info string this build is single-threaded; Threads remains 1");
     } else if (key == "backend") {
-        options_.backend = Backend::Cpu;
+        changed = false;
         if (lower_value != "cpu") {
             print_line("info string GPU/hybrid evaluation is not implemented; using cpu");
         }
     } else if (key == "syzygypath") {
-        options_.syzygy_path = value;
+        changed = false;
         print_line("info string Syzygy probing is not implemented in this native build");
     } else if (key == "deepevalbudgetms" && parse_int(value, number)) {
-        options_.deep_eval_budget_ms = std::clamp(number, 0, 1000);
+        changed = false;
         print_line("info string DeepEvalBudgetMs retained for compatibility but inactive");
     } else if (key == "deepevalbatchsize" && parse_int(value, number)) {
-        options_.deep_eval_batch_size = std::clamp(number, 1, 1024);
+        changed = false;
         print_line("info string DeepEvalBatchSize retained for compatibility but inactive");
     } else if (key == "usebook") {
         options_.use_book = lower_value == "true" || lower_value == "1";

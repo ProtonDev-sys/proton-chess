@@ -589,6 +589,36 @@ void test_attack_tables() {
     const std::vector<int> bishop_directions = {9, 7, -9, -7};
     const std::vector<int> rook_directions = {8, -8, 1, -1};
 
+    std::size_t subset_count = 0;
+    for (const auto& directions : {bishop_directions, rook_directions}) {
+        const bool diagonal = directions == bishop_directions;
+        for (int square = 0; square < 64; ++square) {
+            proton::Bitboard mask = 0;
+            for (const int delta : directions) {
+                int current = square;
+                while (proton::attacks::valid_step(current, current + delta, delta)) {
+                    current += delta;
+                    if (proton::attacks::valid_step(current, current + delta, delta)) {
+                        mask |= proton::bit(current);
+                    }
+                }
+            }
+            proton::Bitboard subset = 0;
+            do {
+                for (const proton::Bitboard occupied : {subset, subset | ~mask}) {
+                    const proton::Bitboard actual = diagonal
+                        ? proton::attacks::bishop(square, occupied)
+                        : proton::attacks::rook(square, occupied);
+                    expect(actual == slow_sliding_attacks(square, occupied, directions),
+                           "sliding lookup matches every relevant occupancy subset");
+                }
+                ++subset_count;
+                subset = (subset - mask) & mask;
+            } while (subset != 0);
+        }
+    }
+    expect(subset_count == 107648, "exhaustive slider subset coverage");
+
     // Empty, full, single-blocker and random occupancies exercise every ray
     // direction and every edge square.
     std::vector<proton::Bitboard> occupancies = {0, ~proton::Bitboard{0}};
@@ -1567,7 +1597,7 @@ void test_qsearch_keeps_delta_pruned_checking_captures() {
 }
 
 void test_evaluation_symmetry_and_passers() {
-    proton::CoreEvalNet evaluator;
+    proton::StaticEvaluator evaluator;
     proton::Position position;
     std::mt19937 random(20261001);
     for (int sample = 0; sample < 64; ++sample) {

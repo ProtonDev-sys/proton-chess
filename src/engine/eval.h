@@ -9,8 +9,6 @@
 
 namespace proton {
 
-enum class Backend { Cpu, Gpu, Hybrid };
-
 inline constexpr int UciEloMin = 800;
 inline constexpr int UciEloDefault = 2800;
 inline constexpr int UciEloLegacyTop = 2800;
@@ -48,12 +46,7 @@ struct UciEloProfile {
 }
 
 struct EngineOptions {
-    Backend backend = Backend::Cpu;
-    int threads = 1;
     int hash_mb = 64;
-    std::string syzygy_path;
-    int deep_eval_budget_ms = 5;
-    int deep_eval_batch_size = 16;
 
     bool use_book = true;
     std::string book_file = "openings/book_lines.txt";
@@ -69,9 +62,9 @@ struct EngineOptions {
     std::uint64_t human_seed = 0;
 };
 
-class CoreEvalNet {
+class StaticEvaluator {
 public:
-    CoreEvalNet();
+    StaticEvaluator();
     [[nodiscard]] int evaluate(const Position& position) const;
     void clear_cache();
 
@@ -90,26 +83,13 @@ private:
     mutable std::vector<PawnCacheEntry> pawn_cache_{};
 };
 
-class DeepEvalNet {
-public:
-    explicit DeepEvalNet(Backend backend = Backend::Cpu);
-    [[nodiscard]] bool available() const;
-    [[nodiscard]] int evaluate(const Position& position) const;
-    [[nodiscard]] std::vector<float> score_moves(const Position& position,
-                                                  const std::vector<Move>& moves) const;
-
-private:
-    Backend backend_;
-};
-
 class Evaluator {
 public:
     Evaluator();
     void set_options(const EngineOptions& options);
-    [[nodiscard]] int evaluate(const Position& position, bool deep_hint = false) const;
+    [[nodiscard]] int evaluate(const Position& position) const;
     [[nodiscard]] std::vector<float> policy_scores(const Position& position,
                                                     const std::vector<Move>& moves) const;
-    [[nodiscard]] bool deep_available() const;
     void clear_cache();
 
 private:
@@ -119,9 +99,7 @@ private:
         bool valid = false;
     };
 
-    EngineOptions options_{};
-    CoreEvalNet core_{};
-    DeepEvalNet deep_{Backend::Cpu};
+    StaticEvaluator core_{};
     mutable std::vector<CacheEntry> cache_{};
 };
 

@@ -3,6 +3,11 @@
 #include <array>
 #include <bit>
 
+#if defined(PROTON_NATIVE_ATTACKS) && (defined(_M_X64) || defined(__BMI2__))
+#include <immintrin.h>
+#define PROTON_PEXT_ATTACKS
+#endif
+
 #include "types.h"
 
 namespace proton::attacks {
@@ -95,14 +100,52 @@ inline constexpr std::array<std::array<Bitboard, 64>, 8> Rays = make_ray_table()
     return result ^ Rays[direction][blocker];
 }
 
-[[nodiscard]] inline Bitboard bishop(int square, Bitboard occupied) {
+[[nodiscard]] inline Bitboard bishop_rays(int square, Bitboard occupied) {
     return ray(4, square, occupied) | ray(5, square, occupied) |
            ray(6, square, occupied) | ray(7, square, occupied);
 }
 
-[[nodiscard]] inline Bitboard rook(int square, Bitboard occupied) {
+[[nodiscard]] inline Bitboard rook_rays(int square, Bitboard occupied) {
     return ray(0, square, occupied) | ray(1, square, occupied) |
            ray(2, square, occupied) | ray(3, square, occupied);
+}
+
+#if defined(PROTON_PEXT_ATTACKS)
+struct SlidingTables {
+    std::array<Bitboard, 64> bishop_masks{};
+    std::array<Bitboard, 64> rook_masks{};
+    std::array<std::uint32_t, 64> bishop_offsets{};
+    std::array<std::uint32_t, 64> rook_offsets{};
+    std::array<Bitboard, 5248> bishop_moves{};
+    std::array<Bitboard, 102400> rook_moves{};
+
+    SlidingTables();
+};
+
+extern const bool HardwarePext;
+extern const SlidingTables Sliding;
+#endif
+
+[[nodiscard]] inline Bitboard bishop(int square, Bitboard occupied) {
+#if defined(PROTON_PEXT_ATTACKS)
+    if (HardwarePext) {
+        const std::size_t index = static_cast<std::size_t>(
+            _pext_u64(occupied, Sliding.bishop_masks[square]));
+        return Sliding.bishop_moves[Sliding.bishop_offsets[square] + index];
+    }
+#endif
+    return bishop_rays(square, occupied);
+}
+
+[[nodiscard]] inline Bitboard rook(int square, Bitboard occupied) {
+#if defined(PROTON_PEXT_ATTACKS)
+    if (HardwarePext) {
+        const std::size_t index = static_cast<std::size_t>(
+            _pext_u64(occupied, Sliding.rook_masks[square]));
+        return Sliding.rook_moves[Sliding.rook_offsets[square] + index];
+    }
+#endif
+    return rook_rays(square, occupied);
 }
 
 [[nodiscard]] inline Bitboard queen(int square, Bitboard occupied) {

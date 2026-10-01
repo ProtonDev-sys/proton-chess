@@ -668,7 +668,7 @@ Move Search::find_quiet_mate(Position& position, int ply) {
 
     for (const Move& move : candidates) {
         if (should_stop()) return Move::null();
-        if (!is_quiet(move)) continue;
+        if (!is_quiet(move) || !position.gives_check(move)) continue;
 
         UndoState undo;
         if (!position.make_move(move, undo)) continue;
