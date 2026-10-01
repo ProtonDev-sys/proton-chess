@@ -1,0 +1,629 @@
+{
+  "date": "2026-10-01",
+  "source_commit": "df98ae3",
+  "version": "0.3.2",
+  "unrestricted_stockfish_target_met": false,
+  "retained_changes": [
+    "dead evaluator scaffolding removal",
+    "exact sliding attack lookup",
+    "quiet-mate check filtering",
+    "direct piece relocation",
+    "inline native architecture consistency",
+    "claimed-draw PGN header correction"
+  ],
+  "reverted_trials": [
+    "conservative-lmr",
+    "passer-king",
+    "capture-depth"
+  ],
+  "stockfish_release": {
+    "tag": "sf_19",
+    "published_at": "2026-09-05T08:33:17Z",
+    "release_url": "https://github.com/official-stockfish/Stockfish/releases/tag/sf_19",
+    "asset": "stockfish-windows-x86-64-universal.zip",
+    "archive_digest": "sha256:3c8bf1f9ea66a09350a40df4f632288285ac206d99f33ab5842c408fc30b48a7",
+    "binary": "D:\\Development\\Proton Chess\\external\\sf_19\\stockfish-windows-x86-64-universal.exe",
+    "binary_sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+  },
+  "final_native_sha256": "c08253bb2fe4e1e6cf3b69376d5087c121bdb5b77e8ab36f47c524e4db8aabc1",
+  "final_portable_sha256": "6b29275dc28096d6b0f8e7f9385b41203a0a189fa8da9c33d1d04402424b5d41",
+  "validation": {
+    "python_tests_passed": 98,
+    "windows_ctest_targets_passed": 12,
+    "windows_ctest_targets_total": 13,
+    "native_and_portable_perft": [
+      "1000 positions depth 2 seed 20261001",
+      "128 positions depth 3 seed 20261002"
+    ],
+    "linux_gcc_native_reproduces_same_two_failures": true,
+    "known_upstream_assertion_failures": [
+      "a seeded rare Elo 3000 opportunity exercises a real alternative",
+      "exhausted confirmation falls back to the completed root best"
+    ],
+    "suite_fully_green": false
+  },
+  "matches": [
+    {
+      "evidence": "results/2026-10-01/optimization/full-stockfish-cleanup.json",
+      "candidate": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "b464c73ef50ef117cab04f6e4daa796d0a1f947bb88872f7df40e100ed7daeb4"
+      },
+      "opponent": {
+        "id": {
+          "name": "Stockfish 19",
+          "author": "the Stockfish developers (see AUTHORS file)"
+        },
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 100,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261018,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 100,
+          "pairs": 50,
+          "wins": 0,
+          "draws": 5,
+          "losses": 95,
+          "unresolved": 0,
+          "completed_score": 0.025,
+          "pessimistic_score": 0.025,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.0,
+          "score_upper_one_sided": 0.19808183826022852,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "strength_override": {
+        "UCI_LimitStrength": false,
+        "Skill Level": 20
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/direct-move-2200.json",
+      "candidate": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "c09f3a7a059631bd1684f2ac1cfe50437e638973a656bddca5f9f649982274dc"
+      },
+      "opponent": {
+        "id": {
+          "name": "Stockfish 19",
+          "author": "the Stockfish developers (see AUTHORS file)"
+        },
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 200,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261021,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": 2200,
+          "games": 200,
+          "pairs": 100,
+          "wins": 137,
+          "draws": 25,
+          "losses": 38,
+          "unresolved": 0,
+          "completed_score": 0.7475,
+          "pessimistic_score": 0.7475,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.6251126584659592,
+          "score_upper_one_sided": 0.8698873415340409,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": true
+        }
+      ],
+      "strength_override": {
+        "UCI_LimitStrength": true,
+        "UCI_Elo": 2200
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/direct-move-full-250ms.json",
+      "candidate": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "c09f3a7a059631bd1684f2ac1cfe50437e638973a656bddca5f9f649982274dc"
+      },
+      "opponent": {
+        "id": {
+          "name": "Stockfish 19",
+          "author": "the Stockfish developers (see AUTHORS file)"
+        },
+        "sha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0"
+      },
+      "settings": {
+        "games": 40,
+        "move_time": 0.25,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261023,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 40,
+          "pairs": 20,
+          "wins": 0,
+          "draws": 0,
+          "losses": 40,
+          "unresolved": 0,
+          "completed_score": 0.0,
+          "pessimistic_score": 0.0,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.0,
+          "score_upper_one_sided": 0.27366641525559865,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "strength_override": {
+        "UCI_LimitStrength": false,
+        "Skill Level": 20
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/conservative-lmr-selfplay.json",
+      "candidate": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "3ed323a8b9bef5ce75975c388ace895827f471da95b0fb8e9d971530161831cf"
+      },
+      "opponent": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "5eb7f61bbed67bdea4b6c3eb4bf437b553fbb89717916cb11276dfe0d4ea45f6"
+      },
+      "settings": {
+        "games": 120,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261019,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 120,
+          "pairs": 60,
+          "wins": 42,
+          "draws": 45,
+          "losses": 33,
+          "unresolved": 0,
+          "completed_score": 0.5375,
+          "pessimistic_score": 0.5375,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.3794986214840202,
+          "score_upper_one_sided": 0.6955013785159798,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "strength_override": {
+        "UCI_LimitStrength": false,
+        "Skill Level": 20
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/passer-king-selfplay.json",
+      "candidate": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "3e62cc66cf1fe0fbcb29e017f6dd79c98fb8970e528008ad65be3ebb7cf54489"
+      },
+      "opponent": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "c09f3a7a059631bd1684f2ac1cfe50437e638973a656bddca5f9f649982274dc"
+      },
+      "settings": {
+        "games": 120,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 4,
+        "seed": 20261020,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 120,
+          "pairs": 60,
+          "wins": 43,
+          "draws": 38,
+          "losses": 39,
+          "unresolved": 0,
+          "completed_score": 0.5166666666666667,
+          "pessimistic_score": 0.5166666666666667,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.35866528815068693,
+          "score_upper_one_sided": 0.6746680451826466,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "strength_override": {
+        "UCI_LimitStrength": false,
+        "Skill Level": 20
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/capture-depth-selfplay.json",
+      "candidate": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "f73dfd0349bec75b17dda0b1558dbe4b71b2347e462363c96698f51e288b2ba7"
+      },
+      "opponent": {
+        "id": {
+          "name": "Proton Chess 0.3.2",
+          "author": "ProtonDev-sys"
+        },
+        "sha256": "c09f3a7a059631bd1684f2ac1cfe50437e638973a656bddca5f9f649982274dc"
+      },
+      "settings": {
+        "games": 120,
+        "move_time": 0.1,
+        "max_plies": 800,
+        "hash_mb": 64,
+        "threads_per_engine": 1,
+        "move_overhead_ms": 1,
+        "workers": 2,
+        "seed": 20261022,
+        "confidence": 0.95,
+        "openings_sha256": "d58775f05e0eaf50703f648bf20f93522cf8841fcadf0537a6520c5da44c5ae8"
+      },
+      "results": [
+        {
+          "opponent_elo": null,
+          "games": 120,
+          "pairs": 60,
+          "wins": 47,
+          "draws": 39,
+          "losses": 34,
+          "unresolved": 0,
+          "completed_score": 0.5541666666666667,
+          "pessimistic_score": 0.5541666666666667,
+          "confidence": 0.95,
+          "score_lower_one_sided": 0.3961652881506869,
+          "score_upper_one_sided": 0.7121680451826464,
+          "confidence_method": "Hoeffding on opening pairs; unresolved=0/1 for lower/upper bounds",
+          "passes": false
+        }
+      ],
+      "strength_override": {
+        "UCI_LimitStrength": false,
+        "Skill Level": 20
+      }
+    }
+  ],
+  "search_comparisons": [
+    {
+      "evidence": "results/2026-10-01/optimization/final-throughput.json",
+      "limit": {
+        "kind": "depth",
+        "value": 10
+      },
+      "trials": 3,
+      "summary": {
+        "search_pairs_compared": 150,
+        "unique_positions_compared": 50,
+        "trials_observed": 3,
+        "bestmove_matches": 150,
+        "score_matches": 150,
+        "depth_matches": 150,
+        "seldepth_matches": 150,
+        "node_matches": 150,
+        "pv_matches": 150,
+        "all_semantic_matches": 150,
+        "semantic_mismatches": [],
+        "candidate_info_nodes": 39436800,
+        "baseline_info_nodes": 39436800,
+        "node_efficiency_comparable": true,
+        "candidate_engine_time_ms": 32910,
+        "baseline_engine_time_ms": 35255,
+        "engine_time_delta_percent": -6.6515387888242845,
+        "candidate_median_engine_time_ms": 163.5,
+        "baseline_median_engine_time_ms": 189.5,
+        "candidate_wall_time_ms": 33211.1,
+        "baseline_wall_time_ms": 35534.001,
+        "wall_time_delta_percent": -6.5371220088613065,
+        "trial_totals": [
+          {
+            "trial": 1,
+            "search_pairs": 50,
+            "candidate_info_nodes": 13145600,
+            "baseline_info_nodes": 13145600,
+            "candidate_engine_time_ms": 15793,
+            "baseline_engine_time_ms": 15787,
+            "candidate_wall_time_ms": 16020.916,
+            "baseline_wall_time_ms": 15990.366
+          },
+          {
+            "trial": 2,
+            "search_pairs": 50,
+            "candidate_info_nodes": 13145600,
+            "baseline_info_nodes": 13145600,
+            "candidate_engine_time_ms": 8811,
+            "baseline_engine_time_ms": 10008,
+            "candidate_wall_time_ms": 8849.271,
+            "baseline_wall_time_ms": 10044.762
+          },
+          {
+            "trial": 3,
+            "search_pairs": 50,
+            "candidate_info_nodes": 13145600,
+            "baseline_info_nodes": 13145600,
+            "candidate_engine_time_ms": 8306,
+            "baseline_engine_time_ms": 9460,
+            "candidate_wall_time_ms": 8340.913,
+            "baseline_wall_time_ms": 9498.873
+          }
+        ],
+        "candidate_median_trial_engine_time_ms": 8811,
+        "baseline_median_trial_engine_time_ms": 10008,
+        "candidate_repeatability": {
+          "eligible_positions": 50,
+          "repeatable_positions": 50,
+          "mismatches": []
+        },
+        "baseline_repeatability": {
+          "eligible_positions": 50,
+          "repeatable_positions": 50,
+          "mismatches": []
+        },
+        "deterministic_across_trials": true,
+        "node_delta": 0,
+        "node_delta_percent": 0.0,
+        "candidate_more_nodes": 0,
+        "candidate_fewer_nodes": 0,
+        "same_nodes": 150,
+        "maximum_absolute_node_delta": 0
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/final-equivalence.json",
+      "limit": {
+        "kind": "depth",
+        "value": 9
+      },
+      "trials": 2,
+      "summary": {
+        "search_pairs_compared": 100,
+        "unique_positions_compared": 50,
+        "trials_observed": 2,
+        "bestmove_matches": 100,
+        "score_matches": 100,
+        "depth_matches": 100,
+        "seldepth_matches": 100,
+        "node_matches": 100,
+        "pv_matches": 100,
+        "all_semantic_matches": 100,
+        "semantic_mismatches": [],
+        "candidate_info_nodes": 11760992,
+        "baseline_info_nodes": 11760992,
+        "node_efficiency_comparable": true,
+        "candidate_engine_time_ms": 8202,
+        "baseline_engine_time_ms": 8046,
+        "engine_time_delta_percent": 1.9388516032811332,
+        "candidate_median_engine_time_ms": 71.0,
+        "baseline_median_engine_time_ms": 73.0,
+        "candidate_wall_time_ms": 8279.628,
+        "baseline_wall_time_ms": 8119.534,
+        "wall_time_delta_percent": 1.9717141402449956,
+        "trial_totals": [
+          {
+            "trial": 1,
+            "search_pairs": 50,
+            "candidate_info_nodes": 5880496,
+            "baseline_info_nodes": 5880496,
+            "candidate_engine_time_ms": 4078,
+            "baseline_engine_time_ms": 3972,
+            "candidate_wall_time_ms": 4116.771,
+            "baseline_wall_time_ms": 4006.903
+          },
+          {
+            "trial": 2,
+            "search_pairs": 50,
+            "candidate_info_nodes": 5880496,
+            "baseline_info_nodes": 5880496,
+            "candidate_engine_time_ms": 4124,
+            "baseline_engine_time_ms": 4074,
+            "candidate_wall_time_ms": 4162.857,
+            "baseline_wall_time_ms": 4112.631
+          }
+        ],
+        "candidate_median_trial_engine_time_ms": 4101.0,
+        "baseline_median_trial_engine_time_ms": 4023.0,
+        "candidate_repeatability": {
+          "eligible_positions": 50,
+          "repeatable_positions": 50,
+          "mismatches": []
+        },
+        "baseline_repeatability": {
+          "eligible_positions": 50,
+          "repeatable_positions": 50,
+          "mismatches": []
+        },
+        "deterministic_across_trials": true,
+        "node_delta": 0,
+        "node_delta_percent": 0.0,
+        "candidate_more_nodes": 0,
+        "candidate_fewer_nodes": 0,
+        "same_nodes": 100,
+        "maximum_absolute_node_delta": 0
+      }
+    },
+    {
+      "evidence": "results/2026-10-01/optimization/final-native-portable.json",
+      "limit": {
+        "kind": "depth",
+        "value": 9
+      },
+      "trials": 2,
+      "summary": {
+        "search_pairs_compared": 100,
+        "unique_positions_compared": 50,
+        "trials_observed": 2,
+        "bestmove_matches": 100,
+        "score_matches": 100,
+        "depth_matches": 100,
+        "seldepth_matches": 100,
+        "node_matches": 100,
+        "pv_matches": 100,
+        "all_semantic_matches": 100,
+        "semantic_mismatches": [],
+        "candidate_info_nodes": 11760992,
+        "baseline_info_nodes": 11760992,
+        "node_efficiency_comparable": true,
+        "candidate_engine_time_ms": 8532,
+        "baseline_engine_time_ms": 11162,
+        "engine_time_delta_percent": -23.562085647733376,
+        "candidate_median_engine_time_ms": 74.0,
+        "baseline_median_engine_time_ms": 100.0,
+        "candidate_wall_time_ms": 8607.106,
+        "baseline_wall_time_ms": 11249.413,
+        "wall_time_delta_percent": -23.488398905791797,
+        "trial_totals": [
+          {
+            "trial": 1,
+            "search_pairs": 50,
+            "candidate_info_nodes": 5880496,
+            "baseline_info_nodes": 5880496,
+            "candidate_engine_time_ms": 3998,
+            "baseline_engine_time_ms": 5136,
+            "candidate_wall_time_ms": 4032.555,
+            "baseline_wall_time_ms": 5173.153
+          },
+          {
+            "trial": 2,
+            "search_pairs": 50,
+            "candidate_info_nodes": 5880496,
+            "baseline_info_nodes": 5880496,
+            "candidate_engine_time_ms": 4534,
+            "baseline_engine_time_ms": 6026,
+            "candidate_wall_time_ms": 4574.551,
+            "baseline_wall_time_ms": 6076.26
+          }
+        ],
+        "candidate_median_trial_engine_time_ms": 4266.0,
+        "baseline_median_trial_engine_time_ms": 5581.0,
+        "candidate_repeatability": {
+          "eligible_positions": 50,
+          "repeatable_positions": 50,
+          "mismatches": []
+        },
+        "baseline_repeatability": {
+          "eligible_positions": 50,
+          "repeatable_positions": 50,
+          "mismatches": []
+        },
+        "deterministic_across_trials": true,
+        "node_delta": 0,
+        "node_delta_percent": 0.0,
+        "candidate_more_nodes": 0,
+        "candidate_fewer_nodes": 0,
+        "same_nodes": 100,
+        "maximum_absolute_node_delta": 0
+      }
+    }
+  ],
+  "game_audit": [
+    {
+      "file": "capture-depth-selfplay.json",
+      "games": 120,
+      "legal_replay_and_rescore": true,
+      "legacy_claimed_draw_headers": 0
+    },
+    {
+      "file": "conservative-lmr-selfplay.json",
+      "games": 120,
+      "legal_replay_and_rescore": true,
+      "legacy_claimed_draw_headers": 41
+    },
+    {
+      "file": "direct-move-2200.json",
+      "games": 200,
+      "legal_replay_and_rescore": true,
+      "legacy_claimed_draw_headers": 25
+    },
+    {
+      "file": "direct-move-full-250ms.json",
+      "games": 40,
+      "legal_replay_and_rescore": true,
+      "legacy_claimed_draw_headers": 0
+    },
+    {
+      "file": "full-stockfish-cleanup.json",
+      "games": 100,
+      "legal_replay_and_rescore": true,
+      "legacy_claimed_draw_headers": 5
+    },
+    {
+      "file": "passer-king-selfplay.json",
+      "games": 120,
+      "legal_replay_and_rescore": true,
+      "legacy_claimed_draw_headers": 34
+    }
+  ],
+  "caveats": [
+    "95% Hoeffding bounds use opening pairs, not individual games",
+    "finite 50-opening suite sampled with replacement",
+    "shared host load affects timing and strength-limited Stockfish randomness",
+    "snapshots and time controls are not pooled",
+    "105 legacy claimed-draw PGN headers are *, but JSON scores and replayed outcomes are correct"
+  ]
+}

@@ -145,3 +145,5 @@ Human mode does not blindly add noise. A failed opportunity roll returns the ful
 The repository includes native tests, UCI protocol smoke tests, perft regressions, legal move-generation cross-checks, deterministic fixed-search comparison tooling, and paired engine-match tooling under `tools/`.
 
 A passing test suite proves correctness of the covered invariants; it is not by itself an Elo claim. Strength changes should be evaluated with the pinned paired-search and colour-swapped match protocols described in `matches/README.md`.
+
+The latest cleanup checkpoint is `docs/optimization-2026-10-01.md`: exact-search throughput improves, a fresh Stockfish 19 UCI_Elo 2200 sample passes, and unrestricted Stockfish 19 remains decisively stronger. Reverted strength experiments and the two known upstream test failures are recorded explicitly.
