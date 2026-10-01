@@ -1,10 +1,13 @@
 import argparse
+import io
 from pathlib import Path
 import sys
 import tempfile
 import queue
 import time
 import unittest
+
+import chess.pgn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
@@ -80,6 +83,21 @@ class MatchToolsTests(unittest.TestCase):
         result = play_game(engine, engine, ["e2e4", "e7e5"], True, args, 0, 2200)
         self.assertIsNone(result.point)
         self.assertEqual(result.termination, "ply-limit")
+        game = chess.pgn.read_game(io.StringIO(result.pgn))
+        self.assertEqual(game.headers["Result"], "*")
+
+    def test_claimed_draw_is_recorded_in_pgn(self):
+        args = argparse.Namespace(max_plies=8, move_time=0.1)
+        engine = argparse.Namespace(id={"name": "test"})
+        opening = ["g1f3", "g8f6", "f3g1", "f6g8"] * 2
+        result = play_game(engine, engine, opening, True, args, 0, 2200)
+        self.assertEqual(result.point, 0.5)
+        self.assertEqual(result.termination, "threefold_repetition")
+        game = chess.pgn.read_game(io.StringIO(result.pgn))
+        self.assertFalse(game.errors)
+        self.assertEqual(game.headers["Result"], "1/2-1/2")
+        self.assertEqual(game.end().board().outcome(claim_draw=True).result(),
+                         game.headers["Result"])
 
     def test_terminal_game_at_cap_is_not_unresolved(self):
         args = argparse.Namespace(max_plies=4, move_time=0.1)
@@ -88,6 +106,8 @@ class MatchToolsTests(unittest.TestCase):
                            True, args, 0, 2200)
         self.assertEqual(result.point, 0)
         self.assertEqual(result.termination, "checkmate")
+        game = chess.pgn.read_game(io.StringIO(result.pgn))
+        self.assertEqual(game.headers["Result"], "0-1")
 
 
 if __name__ == "__main__":

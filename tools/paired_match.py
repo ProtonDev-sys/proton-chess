@@ -86,6 +86,7 @@ def play_game(candidate: chess.engine.SimpleEngine, opponent: chess.engine.Simpl
     game.headers.update({"Event": "Proton paired strength test", "Round": str(pair + 1),
                          "White": candidate_name if candidate_white else opponent_name,
                          "Black": opponent_name if candidate_white else candidate_name,
+                         "Result": "*" if outcome is None else outcome.result(),
                          "Termination": termination, "TimeControl": f"movetime {args.move_time}"})
     if level is not None:
         game.headers["BlackElo" if candidate_white else "WhiteElo"] = str(level)

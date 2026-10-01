@@ -113,8 +113,15 @@ void Position::remove_piece(Piece piece, int square) {
 }
 
 void Position::move_piece(Piece piece, int from, int to) {
-    remove_piece(piece, from);
-    add_piece(piece, to);
+    const Bitboard changed_squares = bit(from) | bit(to);
+    const Color color = piece_color(piece);
+    board_[from] = Empty;
+    board_[to] = piece;
+    pieces_[piece] ^= changed_squares;
+    occupancy_[color] ^= changed_squares;
+    if (piece_type(piece) == Pawn) {
+        pawn_key_ ^= zobrist().piece[piece][from] ^ zobrist().piece[piece][to];
+    }
 }
 
 std::int8_t Position::ep_hash_file() const {
@@ -703,10 +710,13 @@ bool Position::make_move_unchecked(const Move& move, UndoState& undo) {
         key_ ^= z.piece[captured][captured_square];
         remove_piece(captured, captured_square);
     }
-    remove_piece(moving, move.from);
-
     const Piece placed = move.is_promotion() ? make_piece(us, move.promotion) : moving;
-    add_piece(placed, move.to);
+    if (move.is_promotion()) {
+        remove_piece(moving, move.from);
+        add_piece(placed, move.to);
+    } else {
+        move_piece(moving, move.from, move.to);
+    }
     key_ ^= z.piece[placed][move.to];
 
     if (rook_from != NoSquare) {
@@ -761,9 +771,13 @@ void Position::unmake_move(const Move& move, const UndoState& undo) {
 
     const Color us = stm_;
     Piece moved = board_[move.to];
-    remove_piece(moved, move.to);
-    if (move.is_promotion()) moved = make_piece(us, Pawn);
-    add_piece(moved, move.from);
+    if (move.is_promotion()) {
+        remove_piece(moved, move.to);
+        moved = make_piece(us, Pawn);
+        add_piece(moved, move.from);
+    } else {
+        move_piece(moved, move.to, move.from);
+    }
 
     if ((move.flags & MoveKingCastle) != 0) {
         const Piece rook = make_piece(us, Rook);

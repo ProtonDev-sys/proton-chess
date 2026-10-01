@@ -250,6 +250,16 @@ void test_random_make_unmake_and_hash() {
             expect(reconstructed.key() == position.key(), "incremental key matches reconstructed key");
             expect(reconstructed.pawn_key() == position.pawn_key(),
                    "incremental pawn key matches reconstructed pawn key");
+            for (int piece_index = proton::WhitePawn;
+                 piece_index <= proton::BlackKing; ++piece_index) {
+                const auto piece = static_cast<proton::Piece>(piece_index);
+                expect(reconstructed.pieces(piece) == position.pieces(piece),
+                       "incremental piece bitboard matches reconstructed position");
+            }
+            for (proton::Color color : {proton::White, proton::Black}) {
+                expect(reconstructed.occupancy(color) == position.occupancy(color),
+                       "incremental occupancy matches reconstructed position");
+            }
 
             std::vector<proton::Move> legal;
             position.generate_legal_moves(legal);
