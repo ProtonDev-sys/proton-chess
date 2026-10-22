@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-and-test:
     name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ contains(fromJSON('["push","schedule","workflow_dispatch","release"]'), github.event_name) && (vars.CI_SERVER_LINUX == 'true' && !contains(matrix.os, 'arm') && startsWith(matrix.os, 'ubuntu-26.') && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-26.04"]') || vars.CI_SERVER_LINUX == 'true' && !contains(matrix.os, 'arm') && (startsWith(matrix.os, 'ubuntu-') || contains(matrix.os, 'ubuntu-')) && fromJSON('["self-hosted","Linux","X64","desktop-3flaofg","ubuntu-24.04"]') || vars.CI_SERVER_WINDOWS == 'true' && contains(matrix.os, 'windows-') && !contains(matrix.os, 'arm') && !contains(matrix.os, 'vs2026') && fromJSON('["self-hosted","Windows","X64","desktop-3flaofg"]')) || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
