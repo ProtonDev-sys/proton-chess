@@ -67,7 +67,7 @@ def main():
             board = chess.Board(fen)
             for seed in range(1, args.seeds + 1):
                 human.configure({"HumanSeed": seed})
-                move, main_info, final_info, infos = search(human, board, args.depth)
+                move, main_info, final_info, _ = search(human, board, args.depth)
                 # Reassigning an unchanged seed intentionally retains RNG state.
                 human.configure({"HumanSeed": seed + args.seeds + 1})
                 human.configure({"HumanSeed": seed})
@@ -87,7 +87,7 @@ def main():
                 loss = best - chosen if chosen is not None else -32000
                 assert loss <= allowance, (fen, seed, move, best, chosen)
                 if loss > 25:
-                    shallow = next(info for info in infos if info.get("depth") == 2)
+                    shallow = verifier.analyse(board, chess.engine.Limit(depth=2), game=object())
                     shallow_best = shallow["score"].pov(board.turn).score()
                     short = verifier.analyse(board, chess.engine.Limit(depth=2),
                                              root_moves=[move], game=object())

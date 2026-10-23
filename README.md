@@ -153,7 +153,7 @@ The supported UCI Elo range is 800–3000. The Elo control maps to the same boun
 Human mode does not blindly add noise. A failed opportunity roll returns the full-search move without reserving confirmation budget. An active opportunity preserves forced mates and confirms a sampled candidate with a separate restricted search before returning it. Root search bounds guide sampling; only a completed confirmation can admit an alternative inside the configured loss allowance. An interrupted confirmation returns the completed root best.
 
 Meaningful intentional losses (over 25 cp) must also look reasonable at depth
-two, within 35 cp of that iteration's best score. This favors mistakes revealed
+two, within 35 cp of a fresh shallow best score. This favors mistakes revealed
 by deeper calculation over obvious missed material. Repetition is discouraged
 when an equal or better verified continuation exists; drawing repetitions are
 preserved when continuing would worsen the searched score.

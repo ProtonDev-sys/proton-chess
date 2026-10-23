@@ -163,7 +163,6 @@ private:
     bool main_budget_exhausted_ = false;
     bool selection_budget_reserved_ = false;
     bool selection_opportunity_ = false;
-    int human_shallow_best_ = NoScore;
 
     std::array<std::array<Move, 2>, MaxPly> killers_{};
     std::array<std::array<std::array<int, 64>, 64>, 2> history_{};
@@ -251,6 +250,9 @@ private:
                                          int completed_depth);
     [[nodiscard]] std::optional<SearchResult> confirm_human_candidate(
         const Position& position, const Move& candidate, int completed_depth,
+        int* shallow_score = nullptr);
+    [[nodiscard]] std::optional<SearchResult> verify_human_search(
+        const Position& position, int depth, const Move& only_move = Move::null(),
         int* shallow_score = nullptr);
 
     [[nodiscard]] int draw_score(const Position& position) const;

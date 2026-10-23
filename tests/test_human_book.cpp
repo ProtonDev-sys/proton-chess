@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "engine/human_prior.h"
 #include "engine/search.h"
 
 namespace proton {
@@ -488,6 +489,80 @@ void test_tiny_prior_retains_provisional_loss_penalty() {
            "a tiny positive book prior retains the pessimistic bound's sampling penalty");
 }
 
+void test_total_book_sampling_odds() {
+    const proton::Position position;
+    const auto best = position.parse_uci_move("e2e4");
+    const auto alternative = position.parse_uci_move("d2d4");
+    const auto excluded = position.parse_uci_move("g1f3");
+    const auto logits = proton::human_move_logits(position, {best, alternative, excluded});
+    const float maximum = *std::max_element(logits.begin(), logits.end());
+    const auto human_weight = [&](std::size_t index) {
+        return std::exp(std::clamp(static_cast<double>(logits[index] - maximum),
+                                   -std::log(32.0), 0.0));
+    };
+    std::mt19937_64 random(1);
+    const double draw = static_cast<double>(random() >> 11U) / 9007199254740992.0;
+    constexpr double Margin = 0.0001;
+    expect(draw > Margin && draw < 1.0 - Margin, "sampling boundary draw is interior");
+
+    for (const int skill : {0, 8, 16, 20}) {
+        auto options = human_options();
+        options.human_skill = skill;
+        options.book_randomness = 100;  // Book probabilities follow the raw weights.
+        proton::Evaluator evaluator;
+        evaluator.set_options(options);
+        auto search = std::make_unique<proton::Search>(evaluator, options);
+        const int gap = 20 - skill;
+        const int allowance = std::min(700, 12 + 8 * gap + 2 * gap * gap);
+        const double temperature = 4.0 + 3.5 * gap;
+        if (skill == 16) expect(allowance == 76, "default skill-16 loss fixture is 76cp");
+        for (const bool exact : {false, true}) {
+            for (const int loss : {0, allowance / 2, allowance, allowance + 1000}) {
+                if (exact && loss > allowance) continue;
+                for (const int book_weight : {0, 1, 3}) {
+                    // The excluded root contributes to book normalization but
+                    // cannot enter sampling. The alternative's multipliers are
+                    // independently known: 1, 1 + 15/4, and the maximum 16.
+                    const int other_weight = book_weight == 3 ? 0 : 3;
+                    const double book_factor = 1.0 + 15.0 * book_weight /
+                                                         (book_weight + other_weight);
+                    Access::book(*search, position,
+                                 {{alternative, book_weight}, {excluded, other_weight}});
+                    const double alternative_weight =
+                        std::exp(-std::min(loss, allowance) / temperature) *
+                        human_weight(1) / 1.18 * book_factor;
+                    const double incumbent_factor = human_weight(0) * (1.0 + 0.55 * skill);
+                    for (const bool sample_alternative : {false, true}) {
+                        // Solve for an incumbent policy placing its predicted
+                        // probability just above/below the fixed RNG draw. This
+                        // probes the selector's combined weights, including
+                        // both evaluation and policy, without exposing a helper.
+                        const double probability = draw + (sample_alternative ? -Margin : Margin);
+                        Roots roots = {{best, 1000, 0, static_cast<float>(std::log(
+                            probability / (1.0 - probability) * alternative_weight /
+                            incumbent_factor) / 0.20), true, {best}},
+                            {alternative, 1000 - loss, 0, 0.0F, exact, {alternative}},
+                            {excluded, -2000, 0, 0.0F, true, {excluded}}};
+                        Access::opportunity(*search, true);
+                        Access::apply(*search, position, roots);
+                        // One node distinguishes sampling an alternative from
+                        // the incumbent, while requiring fresh confirmation to
+                        // fail closed even when its supplied bound was exact.
+                        Access::prepare_selection(*search, 1, 1);
+                        const auto selected = Access::select(*search, position, roots, 3);
+                        const std::string context = "skill=" + std::to_string(skill) +
+                            " exact=" + std::to_string(exact) + " loss=" + std::to_string(loss) +
+                            " book=" + std::to_string(book_weight);
+                        expect(selected == best && Access::nodes(*search) ==
+                                   (sample_alternative ? 1ULL : 0ULL),
+                               "total book odds match the independent probability boundary: " + context);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void test_seeded_opening_search() {
     for (const auto& moves : std::vector<std::vector<std::string>>{{}, {"e2e4"}, {"d2d4"}}) {
         const auto position = position_after(moves);
@@ -500,7 +575,9 @@ void test_seeded_opening_search() {
         expect(first.depth == limits.depth && first.nodes > 0 && same_result(first, second),
                "human opening book searches reproducibly with a fixed seed");
         bool confirmed_alternative = false;
-        for (std::uint64_t seed = 1; seed <= 32 && !confirmed_alternative; ++seed) {
+        // Correctly bounded book odds make alternatives rarer. This checks
+        // that each opening can produce a verified alternative, not its rate.
+        for (std::uint64_t seed = 1; seed <= 512 && !confirmed_alternative; ++seed) {
             options.human_seed = seed;
             proton::Evaluator evaluator;
             evaluator.set_options(options);
@@ -537,6 +614,7 @@ int main() {
     test_book_candidate_pool_and_confirmation();
     test_poisoned_book_and_mate_protection();
     test_tiny_prior_retains_provisional_loss_penalty();
+    test_total_book_sampling_odds();
     test_seeded_opening_search();
     if (failures != 0) {
         std::cerr << failures << " human-book test(s) failed\n";

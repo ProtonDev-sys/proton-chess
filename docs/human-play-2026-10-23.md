@@ -17,10 +17,13 @@ ordinary search-rank prefix. Neither source bypasses search confirmation.
 Every selected alternative requires a fresh restricted iterative search at the
 completed root depth. The default loss ceiling is 76 cp: the skill-20 base of
 12 cp plus `8 * (20 - skill) + 2 * (20 - skill)^2`. An intentional loss over
-25 cp must also remain within 35 cp of the completed depth-two best score.
-This uses the confirmation search's existing shallow iteration, favoring
-mistakes that become apparent through deeper calculation over obvious material
-misses. It adds no second verification search.
+25 cp must also remain within 35 cp of a fresh depth-two best score. The
+candidate's shallow score comes from its confirmation search. A fresh shallow
+reference is computed on demand and reused within that selection, so retained
+deeper transposition entries cannot distort the comparison. Both searches
+share the parent's remaining budget, cancellation signals, and root
+restrictions. This favors mistakes revealed by deeper calculation over obvious
+material misses.
 
 Repeated positions receive lower sampling weights. When the incumbent repeats,
 a verified alternative must preserve or improve its searched score. This keeps
@@ -107,6 +110,10 @@ CTest targets. All six C++ targets pass in Debug with ASan and UBSan, LTO
 disabled. Perft regressions and a legal-move cross-check on nine curated plus
 40 random positions (ten plies, seed 17) pass. Python tooling compiles.
 
+Selector regressions include 168 probability-boundary checks of the combined
+book sampling weights, plus retained deeper-cache entries, root restrictions,
+exhausted reference budgets, cancellation, and expired deadlines.
+
 The first implementation passed all 13 portable/native Release CTest targets,
 all three C++ ASan/UBSan targets, perft regressions, differential perft on 1,000
 positions at depth two, and legal-move checks on nine curated plus 100 random
@@ -124,9 +131,9 @@ against the main search's completed score, within the 76 cp allowance.
 
 The same profile completes 12 legal games from six paired match openings,
 with colors reversed, 1,500 nodes per move, book enabled, and seeds 20261023
-and 20261024. There are 1,333 searched plies: ten checkmates, one threefold
-repetition, and one fifty-move draw. Final PVs agree with played moves and
-reported node counts remain within the limit.
+and 20261024. There are 1,327 searched plies: nine checkmates, two threefold
+repetitions, and one insufficient-material draw. Final PVs agree with played
+moves and reported node counts remain within the limit.
 
 Native prior parity passes on 100 committed golden positions and 2,352 legal
 moves, including both colors, castling, en passant, all promotions, pinned
@@ -135,8 +142,8 @@ on 1,093 positions and 30,191 moves, with logit differences below 5e-8 at the
 probe's printed precision. The committed golden check runs without Python.
 
 The reproducible selector check uses the actual UCI `bestmove`, final PV, fresh
-restricted confirmation, and the main search's completed score and shallow
-iteration:
+restricted confirmation, the main search's completed score, and fresh shallow
+analysis:
 
 ```sh
 python tools/check_human_play.py build/release/proton_chess --json results/club-validation.json
