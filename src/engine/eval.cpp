@@ -574,29 +574,87 @@ std::vector<float> Evaluator::policy_scores(
     Position copy = position;
 
     const Color side = position.side_to_move();
-    const bool early_opening = position.fullmove_number() <= 10;
+    const Color enemy = opposite(side);
+    const int material = non_pawn_material(position);
     const bool king_endgame =
         (position.pieces(WhiteQueen) | position.pieces(BlackQueen)) == 0 &&
-        non_pawn_material(position) <= 2200;
+        material <= 2200;
+    const Bitboard home_knight_squares = side == White ? bit(1) | bit(6)
+                                                       : bit(57) | bit(62);
     const Bitboard home_minors =
-        (position.pieces(make_piece(side, Knight)) |
-         position.pieces(make_piece(side, Bishop))) &
-        home_minor_mask(side);
+        (position.pieces(make_piece(side, Knight)) & home_knight_squares) |
+        (position.pieces(make_piece(side, Bishop)) &
+         (home_minor_mask(side) ^ home_knight_squares));
     const int undeveloped_minors = std::popcount(home_minors);
+    // A FEN's move counter does not tell us whether development is unfinished.
+    // Home minors matter while substantial material remains, not in an ending.
+    const bool development_phase = undeveloped_minors > 0 && material > 2200;
+    const bool evading_check = position.in_check(side);
+    const Bitboard own_pawns = position.pieces(make_piece(side, Pawn));
+    const Bitboard enemy_pawns = position.pieces(make_piece(enemy, Pawn));
+    const auto rook_file_score = [&](int square, Bitboard opposing_pawns) {
+        const Bitboard file = 0x0101010101010101ULL << file_of(square);
+        if ((own_pawns & file) != 0) return 0.0F;
+        return (opposing_pawns & file) == 0 ? 1.2F : 0.7F;
+    };
+
+    // A pawn-structure target survives quiet piece moves without game-history
+    // state. Stop an advanced enemy passer first; otherwise support our own.
+    int plan_pawn = NoSquare;
+    Color plan_color = NoColor;
+    if (king_endgame) {
+        for (Color color : {enemy, side}) {
+            const Bitboard pawns = position.pieces(make_piece(color, Pawn));
+            const Bitboard opposing =
+                position.pieces(make_piece(opposite(color), Pawn));
+            Bitboard candidates = pawns;
+            int best_priority = -1;
+            while (candidates != 0) {
+                const int square = static_cast<int>(std::countr_zero(candidates));
+                candidates &= candidates - 1;
+                const int rr = relative_rank(color, square);
+                const Bitboard forward_file = PassedPawnMasks[color][square] &
+                    (0x0101010101010101ULL << file_of(square));
+                if (rr < 4 || rr > 6 || (pawns & forward_file) != 0 ||
+                    !is_passed_pawn(opposing, color, square)) continue;
+
+                // Advancement, then file, gives the same target after colour
+                // reversal, regardless of bitboard traversal order.
+                const int priority = rr * 8 + 7 - file_of(square);
+                if (priority > best_priority) {
+                    best_priority = priority;
+                    plan_pawn = square;
+                    plan_color = color;
+                }
+            }
+            if (plan_pawn != NoSquare) break;
+        }
+    }
+    const int king_goal = plan_color == enemy
+        ? plan_pawn + (enemy == White ? 8 : -8) : plan_pawn;
+    const auto king_distance = [&](int square) {
+        return std::max(std::abs(file_of(square) - file_of(king_goal)),
+                        std::abs(rank_of(square) - rank_of(king_goal)));
+    };
+    const auto behind_passer = [&](int square, Bitboard occupied) {
+        return file_of(square) == file_of(plan_pawn) &&
+               relative_rank(side, square) < relative_rank(side, plan_pawn) &&
+               (attacks::rook(plan_pawn, occupied) & bit(square)) != 0;
+    };
 
     for (const Move& move : moves) {
         const Piece piece = position.piece_at(move.from);
         const PieceType type = piece_type(piece);
-        const float centrality =
-            static_cast<float>(14 - centre_distance(move.to));
+        const float centralisation = static_cast<float>(
+            centre_distance(move.from) - centre_distance(move.to));
         float score = 0.0F;
 
-        // Centralisation is natural for every piece except a middlegame king.
-        // In reduced material, switch the king back to an active endgame role.
+        // Reward improving a piece, rather than repeatedly moving a piece
+        // that is already central. Endgame kings can join the active pieces.
         if (type == King) {
-            score += centrality * (king_endgame ? 0.24F : -0.10F);
+            score += centralisation * (king_endgame ? 0.24F : -0.10F);
         } else {
-            score += centrality * 0.18F;
+            score += centralisation * 0.18F;
         }
 
         if (move.is_capture()) {
@@ -610,30 +668,46 @@ std::vector<float> Evaluator::policy_scores(
         }
         if (move.is_castle()) score += king_endgame ? 1.5F : 5.0F;
 
+        bool gives_check = false;
+        bool escapes_attack = false;
+        UndoState undo;
+        if (copy.make_move(move, undo)) {
+            gives_check = copy.in_check(copy.side_to_move());
+            if (development_phase && (type == Knight || type == Bishop ||
+                                      type == Queen)) {
+                escapes_attack = position.is_square_attacked(move.from, enemy) &&
+                                 !copy.is_square_attacked(move.to, enemy);
+            }
+            copy.unmake_move(move, undo);
+        }
+        if (gives_check) score += 2.0F;
+        const bool quiet_tempo = !move.is_capture() && !move.is_promotion() &&
+                                 !evading_check && !gives_check && !escapes_attack;
+
         const bool home_knight =
             (piece == WhiteKnight && (move.from == 1 || move.from == 6)) ||
             (piece == BlackKnight && (move.from == 57 || move.from == 62));
         const bool home_bishop =
             (piece == WhiteBishop && (move.from == 2 || move.from == 5)) ||
             (piece == BlackBishop && (move.from == 58 || move.from == 61));
-        if (home_knight) {
+        if (development_phase && home_knight) {
             const int destination_file = file_of(move.to);
             if (destination_file >= 2 && destination_file <= 5) score += 2.8F;
             else score -= 0.9F;  // Do not mistake Na3/Nh3 for normal development.
         }
-        if (home_bishop) score += 1.8F;
+        if (development_phase && home_bishop) score += 1.8F;
 
         // Humans normally finish developing before spending another quiet
-        // tempo on an already-developed minor. Tactical captures are exempt.
-        if (early_opening && undeveloped_minors > 0 &&
+        // tempo on an already-developed minor. Checks, evasions and safe
+        // retreats from attack are as necessary as tactical captures.
+        if (development_phase && quiet_tempo &&
             (type == Knight || type == Bishop) &&
-            !home_knight && !home_bishop &&
-            !move.is_capture() && !move.is_promotion()) {
+            !home_knight && !home_bishop) {
             score -= std::min(1.8F,
                               static_cast<float>(undeveloped_minors) * 0.6F);
         }
 
-        if (early_opening && type == Pawn) {
+        if (development_phase && type == Pawn) {
             const int source_file = file_of(move.from);
             if (source_file == 3 || source_file == 4) {
                 score += (move.flags & MoveDoublePush) != 0 ? 2.2F : 1.0F;
@@ -644,12 +718,37 @@ std::vector<float> Evaluator::policy_scores(
                 score -= 0.5F;
             }
         }
-        if (type == Queen && position.fullmove_number() <= 7) score -= 1.5F;
+        if (development_phase && quiet_tempo && type == Queen) score -= 1.5F;
 
-        UndoState undo;
-        if (copy.make_move(move, undo)) {
-            if (copy.in_check(copy.side_to_move())) score += 2.0F;
-            copy.unmake_move(move, undo);
+        if (type == Rook) {
+            // Seek a better file without rewarding shuffles along an open one.
+            score += rook_file_score(move.to, enemy_pawns & ~bit(move.to)) -
+                     rook_file_score(move.from, enemy_pawns);
+        }
+        if (plan_pawn != NoSquare && quiet_tempo && !move.is_castle()) {
+            if (type == King) {
+                score += static_cast<float>(king_distance(move.from) -
+                                            king_distance(move.to)) * 0.65F;
+            } else if (type == Rook && plan_color == side) {
+                const Bitboard occupied = position.occupancy_all();
+                // Enough to prefer supporting the passer to an empty file,
+                // but bounded to one small improvement, with no shuffle bonus.
+                score += 2.4F * static_cast<float>(
+                    static_cast<int>(behind_passer(move.to, occupied & ~bit(move.from))) -
+                    static_cast<int>(behind_passer(move.from, occupied)));
+            }
+        }
+        if (king_endgame && type == Pawn && !move.is_promotion()) {
+            // Advance a true passer, rather than a rear doubled pawn.
+            const Bitboard forward_file = PassedPawnMasks[side][move.to] &
+                (0x0101010101010101ULL << file_of(move.to));
+            if (is_passed_pawn(enemy_pawns, side, move.to) &&
+                (own_pawns & forward_file) == 0) {
+                const int progress = relative_rank(side, move.to) -
+                                     relative_rank(side, move.from);
+                score += static_cast<float>(
+                             progress * relative_rank(side, move.to)) * 0.25F;
+            }
         }
         scores.push_back(score);
     }

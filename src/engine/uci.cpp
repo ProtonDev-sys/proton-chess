@@ -38,7 +38,7 @@ std::string join_tokens(const std::vector<std::string>& tokens,
 
 }  // namespace
 
-UciLoop::UciLoop() : search_(evaluator_) {
+UciLoop::UciLoop() : search_(evaluator_, options_) {
     evaluator_.set_options(options_);
     search_.set_options(options_);
 }
@@ -316,6 +316,7 @@ void UciLoop::handle_go(const std::string& line) {
 
 void UciLoop::handle_command(const std::string& line, bool& quit) {
     if (line == "uci") {
+        const EngineOptions defaults = club_play_options();
         print_line("id name Proton Chess " PROTON_VERSION);
         print_line("id author ProtonDev-sys");
         print_line("option name Hash type spin default 64 min 1 max 4096");
@@ -323,16 +324,20 @@ void UciLoop::handle_command(const std::string& line, bool& quit) {
         print_line("option name Clear Hash type button");
         print_line("option name UseBook type check default true");
         print_line("option name BookFile type string default openings/book_lines.txt");
-        print_line("option name BookRandomness type spin default 0 min 0 max 100");
+        print_line("option name BookRandomness type spin default " +
+                   std::to_string(defaults.book_randomness) + " min 0 max 100");
         print_line("option name UCI_LimitStrength type check default false");
         print_line("option name UCI_Elo type spin default " + std::to_string(UciEloDefault) +
                    " min " + std::to_string(UciEloMin) +
                    " max " + std::to_string(UciEloMax));
-        print_line("option name Skill Level type spin default 20 min 0 max 20");
-        print_line("option name HumanStyle type check default false");
-        print_line("option name HumanSkill type spin default 20 min 0 max 20");
+        print_line("option name Skill Level type spin default " +
+                   std::to_string(defaults.human_skill) + " min 0 max 20");
+        print_line("option name HumanStyle type check default true");
+        print_line("option name HumanSkill type spin default " +
+                   std::to_string(defaults.human_skill) + " min 0 max 20");
         print_line("option name HumanMaxLossCp type spin default 12 min 0 max 500");
-        print_line("option name HumanVariety type spin default 35 min 0 max 100");
+        print_line("option name HumanVariety type spin default " +
+                   std::to_string(defaults.human_variety_percent) + " min 0 max 100");
         print_line("option name HumanSeed type string default 0");
         print_line("option name MoveOverhead type spin default 25 min 0 max 5000");
         print_line("option name Contempt type spin default 0 min -100 max 100");

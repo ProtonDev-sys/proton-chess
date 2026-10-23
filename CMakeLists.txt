@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(proton_chess VERSION 0.3.2 LANGUAGES CXX)
+project(proton_chess VERSION 0.3.3 LANGUAGES CXX)
 
 option(PROTON_NATIVE "Tune release builds for the current CPU" OFF)
 option(PROTON_LTO "Enable link-time optimisation when supported" ON)
@@ -15,6 +15,7 @@ find_package(Threads REQUIRED)
 add_library(proton_engine
     src/engine/attacks.cpp
     src/engine/eval.cpp
+    src/engine/human_prior.cpp
     src/engine/position.cpp
     src/engine/search.cpp
     src/engine/see.cpp
@@ -74,6 +75,19 @@ if(PROTON_BUILD_TESTS)
     add_executable(proton-human-policy-tests tests/test_human_policy.cpp)
     target_link_libraries(proton-human-policy-tests PRIVATE proton_engine)
     add_test(NAME proton-human-policy-tests COMMAND proton-human-policy-tests)
+
+    add_executable(proton-human-book-tests tests/test_human_book.cpp)
+    target_link_libraries(proton-human-book-tests PRIVATE proton_engine)
+    add_test(NAME proton-human-book-tests COMMAND proton-human-book-tests)
+
+    add_executable(proton-human-choice-tests tests/test_human_choice.cpp)
+    target_link_libraries(proton-human-choice-tests PRIVATE proton_engine)
+    add_test(NAME proton-human-choice-tests COMMAND proton-human-choice-tests)
+
+    add_executable(proton-human-prior-tests tests/test_human_prior.cpp)
+    target_link_libraries(proton-human-prior-tests PRIVATE proton_engine)
+    add_test(NAME proton-human-prior-tests COMMAND proton-human-prior-tests
+             ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/human_prior_golden.txt)
 
     add_executable(proton-threat-eval-tests tests/test_threat_eval.cpp)
     target_link_libraries(proton-threat-eval-tests PRIVATE proton_engine)

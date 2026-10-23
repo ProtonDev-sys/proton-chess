@@ -125,6 +125,7 @@ private:
         float policy = 0.0F;
         bool exact = false;
         std::vector<Move> pv;
+        float book_prior = 0.0F;
     };
 
     struct BookMove {
@@ -183,7 +184,6 @@ private:
     std::unordered_map<std::uint64_t, std::vector<BookMove>> book_{};
     std::mt19937_64 random_{};
     Color root_side_ = White;
-    bool verification_search_ = false;
 
     void resize_hash(int megabytes);
     void clear_hash();
@@ -243,11 +243,17 @@ private:
     bool load_book_file(const std::string& path);
     void add_book_line(const std::vector<std::string>& moves, int weight);
     [[nodiscard]] Move select_book_move(const Position& position);
+    void apply_human_book_priors(const Position& position,
+                                std::vector<RootMove>& root_moves) const;
     [[nodiscard]] Move select_human_move(const Position& position,
                                          std::vector<RootMove>& root_moves,
                                          int completed_depth);
     [[nodiscard]] std::optional<SearchResult> confirm_human_candidate(
-        const Position& position, const Move& candidate, int completed_depth);
+        const Position& position, const Move& candidate, int completed_depth,
+        int* shallow_score = nullptr);
+    [[nodiscard]] std::optional<SearchResult> verify_human_search(
+        const Position& position, int depth, const Move& only_move = Move::null(),
+        int* shallow_score = nullptr);
 
     [[nodiscard]] int draw_score(const Position& position) const;
     [[nodiscard]] int rule50_score(Position& position, int ply, bool in_check);

@@ -18,7 +18,7 @@ public:
 
 private:
     Position position_{};
-    EngineOptions options_{};
+    EngineOptions options_ = club_play_options();
     Evaluator evaluator_{};
     Search search_;
     std::thread worker_{};

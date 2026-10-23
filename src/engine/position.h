@@ -35,7 +35,6 @@ public:
     [[nodiscard]] int fullmove_number() const { return fullmove_; }
     [[nodiscard]] std::uint64_t key() const { return key_; }
     [[nodiscard]] std::uint64_t pawn_key() const { return pawn_key_; }
-    [[nodiscard]] const std::vector<Move>& move_history() const { return move_history_; }
     [[nodiscard]] Piece piece_at(int square) const { return board_[square]; }
     [[nodiscard]] Bitboard pieces(Piece piece) const { return pieces_[piece]; }
     [[nodiscard]] Bitboard occupancy(Color color) const { return occupancy_[color]; }
@@ -79,7 +78,6 @@ private:
     std::uint64_t key_ = 0;
     std::uint64_t pawn_key_ = 0;
     std::vector<std::uint64_t> history_keys_{};
-    std::vector<Move> move_history_{};
 
     void clear();
     void rebuild_bitboards();
