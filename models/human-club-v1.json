@@ -1,0 +1,629 @@
+{
+  "model": "linear conditional logit / softmax over legal moves",
+  "feature_names": [
+    "moving_pawn",
+    "moving_knight",
+    "moving_bishop",
+    "moving_rook",
+    "moving_queen",
+    "moving_king",
+    "capture",
+    "captured_value",
+    "capture_mover_cost",
+    "capture_if_attacked_net",
+    "promotion_gain",
+    "gives_check",
+    "castle",
+    "source_attacked",
+    "destination_attacked",
+    "destination_defended",
+    "destination_enemy_attackers",
+    "destination_defenders",
+    "mover_value_if_attacked",
+    "mover_value_if_undefended_attacked",
+    "escape_attack",
+    "capture_safe",
+    "quiet_safe",
+    "centrality_delta",
+    "destination_centrality",
+    "minor_centrality_delta",
+    "queen_centrality_delta",
+    "king_middlegame_centrality_delta",
+    "king_endgame_centrality_delta",
+    "minor_home_development",
+    "minor_repeat_while_undeveloped",
+    "queen_while_undeveloped",
+    "pawn_advance",
+    "pawn_centre_file",
+    "pawn_edge_file",
+    "pawn_double",
+    "rook_open_file_delta",
+    "rook_semiopen_file_delta",
+    "rook_seventh_rank",
+    "passed_pawn_advance",
+    "passed_pawn_endgame_advance",
+    "new_attacks_enemy_value",
+    "attacks_undefended_enemy_value",
+    "new_attacks_enemy_queen",
+    "king_distance_delta_endgame",
+    "capture_when_material_ahead",
+    "capture_when_material_behind",
+    "pawn_promotion_distance",
+    "bishop_diagonal_activity",
+    "knight_activity",
+    "quiet_check_evasion",
+    "capture_check_evasion",
+    "safe_king_move"
+  ],
+  "raw_feature_weights": [
+    -0.1536760237591934,
+    -0.47697680240950463,
+    0.4066512004488427,
+    -0.06050781698824106,
+    0.2874376691244849,
+    -0.09700994635582413,
+    1.3273108898857822,
+    0.7400954735653803,
+    0.011195713475650933,
+    0.3607816283815592,
+    0.053158771588038244,
+    1.8899657249733446,
+    3.082773123246481,
+    0.7472300068771037,
+    -0.34661987029040464,
+    0.06668989091760417,
+    -0.9041183170165019,
+    0.07380363082680756,
+    -0.22862031919858933,
+    -0.5439849264603334,
+    0.5873275315929406,
+    -1.2243384481141044,
+    -1.6978735757225873,
+    0.015534364494595373,
+    0.060118752794680264,
+    0.11401936292108969,
+    0.04799696069600478,
+    -0.09335459006470777,
+    0.34752097296308393,
+    1.1793980611544246,
+    -0.17666732522579773,
+    -0.2210192819471074,
+    -0.08923687164180032,
+    0.5586397432520208,
+    -0.07503421544872785,
+    -0.07695451942449169,
+    1.0399145915041121,
+    0.8946849859845971,
+    0.6880049745396876,
+    0.060412985528902945,
+    0.5203110623318992,
+    0.14399560629946842,
+    0.07274584059368087,
+    -0.3231394097675671,
+    0.5073722138204692,
+    0.03056971705597347,
+    0.0812593954208154,
+    0.08349862746917298,
+    -0.05769763625882845,
+    0.11385524690043476,
+    -0.08556223832047935,
+    0.2268689330876081,
+    -0.09700994635609853
+  ],
+  "l2": 0.0001,
+  "training_positions": 18731,
+  "validation_positions": 4137,
+  "weight_bytes_float32": 212,
+  "inference": "logit(move)=sum(raw_feature_weights[j]*feature[j]); softmax only over legal candidate moves",
+  "training_data": "Ignored artifacts under --out-dir; regenerate with tools/human_policy scripts",
+  "positions_sha256": "35c81b67eba8cc4ebb9c332d996658b16bb3142e5f4b1a4c0a5d892a2013880b",
+  "feature_definition": "tools/human_policy/features.py:NAMES and candidate_features",
+  "claim": "Human-game move-frequency prior; no strength, human indistinguishability, or 100% human claim.",
+  "format_version": 1,
+  "name": "human-club-v1",
+  "source": {
+    "url": "https://database.lichess.org/standard/lichess_db_standard_rated_2026-09.pgn.zst",
+    "requested_range": "bytes=0-33554431",
+    "compressed_bytes": 33554432,
+    "compressed_sha256": "d629023c6ceb487afcd676cc840e744a1f97b8f8782e9f0af3f846998fa205f6",
+    "status": 206,
+    "headers": {
+      "Server": "nginx",
+      "Date": "Fri, 23 Oct 2026 13:37:43 GMT",
+      "Content-Type": "application/octet-stream",
+      "Content-Length": "33554432",
+      "Last-Modified": "Sat, 03 Oct 2026 05:06:59 GMT",
+      "Connection": "close",
+      "ETag": "\"6ac08d73-6cdeaccb7\"",
+      "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+      "X-Frame-Options": "DENY",
+      "Content-Range": "bytes 0-33554431/29224520887"
+    }
+  },
+  "license": {
+    "identifier": "CC0-1.0",
+    "provenance_url": "https://database.lichess.org/",
+    "provenance_html_sha256": "2b1db536724631cd0a21e24bff3693b26037676e4f91489072f584be51e24b0d",
+    "statement": "Database exports are released under the Creative Commons CC0 license. You can download, modify and redistribute them, without asking for permission.",
+    "scope": "Standard rated monthly database, not the separately licensed broadcast exports."
+  },
+  "extraction": {
+    "counts": {
+      "complete_games_seen": 102432,
+      "rated_rapid_or_classical": 15580,
+      "both_ratings_1800_2200": 2300,
+      "selected_game_total_plies": 166510,
+      "excluded_first_12_plies": 27429,
+      "eligible_plies_before_per_game_cap": 135262,
+      "retained_games": 2290,
+      "games_train": 1590,
+      "event_Rated Rapid game": 2241,
+      "retained_positions": 81721,
+      "positions_train": 56717,
+      "excluded_clock_under_30": 3819,
+      "games_test": 350,
+      "positions_test": 12412,
+      "games_valid": 350,
+      "positions_valid": 12592,
+      "event_Rated Classical game": 49,
+      "bot_title_excluded": 10,
+      "trailing_partial_game_discarded": 1
+    },
+    "decompressed_bytes": 239599616,
+    "split_seed": "proton-human-prior-v1-20261023",
+    "split_rule": "sha256(seed:game_id) first32bits mod100: <70 train; <85 valid; else test",
+    "max_positions_per_game": 40,
+    "position_selection": "smallest sha256(seed:game_id:ply), excluding target move",
+    "clock_filter": "previous recorded mover clock (initially base) and post-move clock minus increment both known and >=30sec; conservative exclusion of increment-masked time pressure",
+    "opening_filter": "exclude plies1..12 inclusive; ply13 is first possible retained decision",
+    "human_filter": "rated rapid/classical Event, both ratings1800..2200 inclusive, BOT titles excluded; cannot certify no undisclosed engine assistance",
+    "source_order_caveat": "archive prefix is a contiguous early-month slice, not a random monthly sample",
+    "file_sha256": {
+      "selected.pgn": "362e7688c831497e4c985fd3ae6f2c23e44d6f9fec455b8e3292a4aaed8697dd",
+      "games.jsonl": "31ecd39d7aa19d31d28cc34a7461fd25255122312fd9e7325a52ca5f3ff3a657",
+      "positions.jsonl": "301edfe85ddbc3ab1c8db44ff8f574d5bea0c7053fca515d9666f897fdb22229"
+    }
+  },
+  "feature_sample": {
+    "feature_names": [
+      "moving_pawn",
+      "moving_knight",
+      "moving_bishop",
+      "moving_rook",
+      "moving_queen",
+      "moving_king",
+      "capture",
+      "captured_value",
+      "capture_mover_cost",
+      "capture_if_attacked_net",
+      "promotion_gain",
+      "gives_check",
+      "castle",
+      "source_attacked",
+      "destination_attacked",
+      "destination_defended",
+      "destination_enemy_attackers",
+      "destination_defenders",
+      "mover_value_if_attacked",
+      "mover_value_if_undefended_attacked",
+      "escape_attack",
+      "capture_safe",
+      "quiet_safe",
+      "centrality_delta",
+      "destination_centrality",
+      "minor_centrality_delta",
+      "queen_centrality_delta",
+      "king_middlegame_centrality_delta",
+      "king_endgame_centrality_delta",
+      "minor_home_development",
+      "minor_repeat_while_undeveloped",
+      "queen_while_undeveloped",
+      "pawn_advance",
+      "pawn_centre_file",
+      "pawn_edge_file",
+      "pawn_double",
+      "rook_open_file_delta",
+      "rook_semiopen_file_delta",
+      "rook_seventh_rank",
+      "passed_pawn_advance",
+      "passed_pawn_endgame_advance",
+      "new_attacks_enemy_value",
+      "attacks_undefended_enemy_value",
+      "new_attacks_enemy_queen",
+      "king_distance_delta_endgame",
+      "capture_when_material_ahead",
+      "capture_when_material_behind",
+      "pawn_promotion_distance",
+      "bishop_diagonal_activity",
+      "knight_activity",
+      "quiet_check_evasion",
+      "capture_check_evasion",
+      "safe_king_move"
+    ],
+    "feature_count": 53,
+    "candidate_count": 864339,
+    "positions": 27001,
+    "games": 2276,
+    "split_counts": {
+      "train": 18731,
+      "test": 4133,
+      "valid": 4137
+    },
+    "max_positions_per_game": 12,
+    "elapsed_seconds": 25.623263835906982,
+    "feature_caveats": "Geometric attackers include pinned attackers; no SEE/search/evaluation. Features use current position and candidate only.",
+    "model_positions_sha256": "35c81b67eba8cc4ebb9c332d996658b16bb3142e5f4b1a4c0a5d892a2013880b"
+  },
+  "evaluation": {
+    "splits": {
+      "train": 1578,
+      "valid": 349,
+      "test": 349
+    },
+    "results": {
+      "uniform": {
+        "train": {
+          "nll_nats": 3.3172210882273387,
+          "top1_tie_averaged": 0.05820218929442479,
+          "positions": 18731
+        },
+        "valid": {
+          "nll_nats": 3.313943657811376,
+          "top1_tie_averaged": 0.05835357442123718,
+          "positions": 4137
+        },
+        "test": {
+          "nll_nats": 3.2879444489931138,
+          "top1_tie_averaged": 0.06302195244604526,
+          "positions": 4133
+        }
+      },
+      "captures_checks": {
+        "train": {
+          "nll_nats": 3.0779509136791856,
+          "top1_tie_averaged": 0.19012366900278865,
+          "positions": 18731
+        },
+        "valid": {
+          "nll_nats": 3.058205013055259,
+          "top1_tie_averaged": 0.20045870045641925,
+          "positions": 4137
+        },
+        "test": {
+          "nll_nats": 3.056097026374074,
+          "top1_tie_averaged": 0.1892508445341789,
+          "positions": 4133
+        }
+      },
+      "handcrafted": {
+        "train": {
+          "nll_nats": 3.089863659663091,
+          "top1_tie_averaged": 0.21054922956850242,
+          "positions": 18731
+        },
+        "valid": {
+          "nll_nats": 3.0811423461542082,
+          "top1_tie_averaged": 0.21658666850835087,
+          "positions": 4137
+        },
+        "test": {
+          "nll_nats": 3.092017226622351,
+          "top1_tie_averaged": 0.21097938005753156,
+          "positions": 4133
+        }
+      },
+      "learned_53features": {
+        "train": {
+          "nll_nats": 2.4499758028157035,
+          "top1_tie_averaged": 0.306470556830922,
+          "positions": 18731
+        },
+        "valid": {
+          "nll_nats": 2.4504533838594065,
+          "top1_tie_averaged": 0.30867778583514627,
+          "positions": 4137
+        },
+        "test": {
+          "nll_nats": 2.406957623499784,
+          "top1_tie_averaged": 0.31974352770384706,
+          "positions": 4133
+        }
+      }
+    },
+    "selected_l2": 0.0001,
+    "validation_calibration_alpha": {
+      "uniform": 1,
+      "captures_checks": 0.6652920697450255,
+      "handcrafted": 0.34203416945942133,
+      "learned_53features": 1
+    },
+    "test_paired_learned_minus_baseline": {
+      "uniform": {
+        "nll_nats": {
+          "difference": -0.8809868254933297,
+          "game_bootstrap_95ci": [
+            -0.9206710311130768,
+            -0.8417260743486937
+          ]
+        },
+        "top1": {
+          "difference": 0.2567215752578018,
+          "game_bootstrap_95ci": [
+            0.2425599449976487,
+            0.2703589521125998
+          ]
+        }
+      },
+      "captures_checks": {
+        "nll_nats": {
+          "difference": -0.6491394028742903,
+          "game_bootstrap_95ci": [
+            -0.6810337967093765,
+            -0.617128136397749
+          ]
+        },
+        "top1": {
+          "difference": 0.1304926831696682,
+          "game_bootstrap_95ci": [
+            0.11707885279709886,
+            0.14365016870259067
+          ]
+        }
+      },
+      "handcrafted": {
+        "nll_nats": {
+          "difference": -0.6850596031225671,
+          "game_bootstrap_95ci": [
+            -0.7345861972879248,
+            -0.6367208113467823
+          ]
+        },
+        "top1": {
+          "difference": 0.10876414764631556,
+          "game_bootstrap_95ci": [
+            0.09581108512759437,
+            0.12193530687153586
+          ]
+        }
+      }
+    },
+    "top1_definition": "Expected match rate with uniform random tie-breaking among maximal-logit legal moves.",
+    "baseline_definition": "captures_checks logit = victim(pawns) -0.1*mover(pawns)*capture +2*check +promotion_gain; positive scale fitted on valid only",
+    "handcrafted_definition": "genuine C++ Evaluator::policy_scores standalone, search/book/bounded selector excluded; positive scale fitted on valid only",
+    "audit": {
+      "games": {
+        "train": 1578,
+        "valid": 349,
+        "test": 349
+      },
+      "game_id_overlap": 0,
+      "test_positions_seen_in_train_or_valid": 8,
+      "test_novel_positions": 4125,
+      "test_subgroups": {
+        "novel_positions": {
+          "uniform": {
+            "nll_nats": 3.2873052481560663,
+            "top1_tie_averaged": 0.06309192644516415,
+            "positions": 4125
+          },
+          "captures_checks": {
+            "nll_nats": 3.055407186927984,
+            "top1_tie_averaged": 0.189368525825743,
+            "positions": 4125
+          },
+          "learned_53features": {
+            "nll_nats": 2.4073183682292085,
+            "top1_tie_averaged": 0.31963636363636366,
+            "positions": 4125
+          },
+          "handcrafted": {
+            "nll_nats": 3.092992735436576,
+            "top1_tie_averaged": 0.2107824915824916,
+            "positions": 4125
+          }
+        },
+        "plies_over24": {
+          "uniform": {
+            "nll_nats": 3.199677119826307,
+            "top1_tie_averaged": 0.0730735054695072,
+            "positions": 2992
+          },
+          "captures_checks": {
+            "nll_nats": 2.9464246888494334,
+            "top1_tie_averaged": 0.21235811870436805,
+            "positions": 2992
+          },
+          "learned_53features": {
+            "nll_nats": 2.3249370374336142,
+            "top1_tie_averaged": 0.3327205882352941,
+            "positions": 2992
+          },
+          "handcrafted": {
+            "nll_nats": 3.090255601916522,
+            "top1_tie_averaged": 0.2120302287581699,
+            "positions": 2992
+          }
+        },
+        "rapid": {
+          "uniform": {
+            "nll_nats": 3.287157312433558,
+            "top1_tie_averaged": 0.06341200828237203,
+            "positions": 4001
+          },
+          "captures_checks": {
+            "nll_nats": 3.0556107974153046,
+            "top1_tie_averaged": 0.19024716128879748,
+            "positions": 4001
+          },
+          "learned_53features": {
+            "nll_nats": 2.4050130537939505,
+            "top1_tie_averaged": 0.32104473881529616,
+            "positions": 4001
+          },
+          "handcrafted": {
+            "nll_nats": 3.093251024298808,
+            "top1_tie_averaged": 0.2113166152906218,
+            "positions": 4001
+          }
+        },
+        "classical": {
+          "uniform": {
+            "nll_nats": 3.311803035165718,
+            "top1_tie_averaged": 0.05119912364950392,
+            "positions": 132
+          },
+          "captures_checks": {
+            "nll_nats": 3.0708349207985997,
+            "top1_tie_averaged": 0.15905187987335362,
+            "positions": 132
+          },
+          "learned_53features": {
+            "nll_nats": 2.4658987098106766,
+            "top1_tie_averaged": 0.2803030303030303,
+            "positions": 132
+          },
+          "handcrafted": {
+            "nll_nats": 3.0546200712927876,
+            "top1_tie_averaged": 0.20075757575757575,
+            "positions": 132
+          }
+        }
+      },
+      "test_games_with_any_training_player": 307,
+      "sample_utc_dates": {
+        "2026.09.01": 2290
+      }
+    },
+    "nonforced_and_unseen_player_audit": {
+      "all_nonforced": {
+        "positions": 4092,
+        "games": 349,
+        "metrics": {
+          "uniform": {
+            "nll": 3.3208881739219303,
+            "top1": 0.053633853729106805
+          },
+          "captures_checks": {
+            "nll": 3.086717744380266,
+            "top1": 0.1811275025561489
+          },
+          "handcrafted": {
+            "nll": 3.12299784888323,
+            "top1": 0.20307374823503857
+          },
+          "learned_53features": {
+            "nll": 2.431074256579816,
+            "top1": 0.31292766373411535
+          }
+        }
+      },
+      "both_players_unseen_in_training": {
+        "positions": 504,
+        "games": 42,
+        "metrics": {
+          "uniform": {
+            "nll": 3.2259167969466436,
+            "top1": 0.06834613143887142
+          },
+          "captures_checks": {
+            "nll": 3.0645982782929195,
+            "top1": 0.16938581303790434
+          },
+          "handcrafted": {
+            "nll": 3.0705580430743664,
+            "top1": 0.18716931216931215
+          },
+          "learned_53features": {
+            "nll": 2.4171696361297244,
+            "top1": 0.2996031746031746
+          }
+        }
+      }
+    }
+  },
+  "handcrafted_baseline": {
+    "eval_cpp_sha256": "12d571dcb84881c1ee36f76ddfb801f4b6eb7d6ab20ee619b18e277b581be043",
+    "source_snapshot_sha256": "b7291c345019b065f6ecc2f9dabeb714d0ff6212c9f5160729cf9c8c4b6d51ff",
+    "source_head": "7b8298cad71ca272ed1422e327d4432dd005b21a",
+    "scope": "Raw handmade policy only. No search, book, repetition history or bounded-selector probability."
+  },
+  "dependencies_training_only": {
+    "chess": "1.11.2",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "zstandard": "0.25.0"
+  },
+  "limitations": [
+    "Contiguous September1 2026 prefix, not random monthly/player sample.",
+    "Game-heldout; most test games share a player with training. 42 wholly unseen-player games show similar uplift, but are small.",
+    "Classical test subset only132positions; predominantly rapid.",
+    "Exact Event filtering excludes tournament/swiss games even if rapid/classical.",
+    "53features include geometric safety; gain does not isolate stylistic human resemblance from basic tactical plausibility.",
+    "No strength, engine-search integration, subjective human-likeness, anti-cheat status or trained-human100% certification.",
+    "Clock filter uses recorded postmoveclock minus increment; no move-time/lag reconstruction.",
+    "Weights optimize alllegalmove frequency; applying to search-safe candidates needs separate calibration/evaluation.",
+    "No heldout tuning: data/features/grid fixed before the single final evaluation; later subgroup checks are descriptive."
+  ],
+  "reproduction": {
+    "commands": [
+      "python tools/human_policy/download.py --out-dir results/human-research",
+      "python tools/human_policy/extract.py --out-dir results/human-research",
+      "python tools/human_policy/features.py --out-dir results/human-research",
+      "python tools/human_policy/train.py --out-dir results/human-research [--handcrafted-binary PATH]",
+      "python tools/human_policy/audit.py --out-dir results/human-research --reference-model models/human-club-v1.json"
+    ],
+    "weights_identity": "Compare raw_feature_weights; path/runtime metadata is not part of weight identity.",
+    "python": "3.12.3",
+    "optimizer": "scipy L-BFGS-B, oneBLASthread, L2grid0.01/0.001/0.0001 selected validationNLL; no refit on test",
+    "verified": {
+      "status": "pass",
+      "all_cli_help": true,
+      "http200_ignored_range_hard_cap": true,
+      "fresh_extract_features_train": true,
+      "all_train_valid_test_metrics_exactly_identical": true,
+      "reference_weights_max_error": 0.0
+    },
+    "script_sha256": {
+      "audit.py": "d0bb7a6ff8444a8ce848752e676fc4051f37ba7772790ae106ed4238f32e8143",
+      "download.py": "7f8e00702c460cce13e15963118682ea37bdb28c9ebfcf5ba63a6952c7f12c05",
+      "extract.py": "c7f6461bda934c600caa833714f97b9f94c2928715ba3f62f278c8971465565a",
+      "features.py": "79825f1224ed326f598103d6fc89df9e491a29df2412d83534e9affe9ffa12e0",
+      "train.py": "27923bed171da7b3ec311dfcd3810a4b97d83e79f0c64c55e477ad7d2b440e62"
+    }
+  },
+  "data_audit": {
+    "status": "pass",
+    "selected_games": 2290,
+    "model_positions": 27001,
+    "model_games": 2276,
+    "candidate_count": 864339,
+    "split_games": {
+      "train": 1578,
+      "valid": 349,
+      "test": 349
+    },
+    "split_positions": {
+      "train": 18731,
+      "valid": 4137,
+      "test": 4133
+    },
+    "duplicate_selected_game_ids": 0,
+    "duplicate_model_game_ply_pairs": 0,
+    "cross_split_game_id_overlap": {
+      "train_valid": 0,
+      "train_test": 0,
+      "valid_test": 0
+    },
+    "test_full_fen_seen_in_train_or_valid": 6,
+    "test_fen_first4fields_seen_in_train_or_valid": 8,
+    "fen_note": "First4fields preserve placement, turn, castling, EP; drop move/halfmove counters. Overlap is measured, not silently removed.",
+    "max_reference_weight_error": 0.0,
+    "package_versions": {
+      "chess": "1.11.2",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1",
+      "zstandard": "0.25.0"
+    }
+  },
+  "raw_weight_vector_sha256": "68528e615852f0f38b0273b49bb9940addd7a83eebb5edfcbc739d9a8d1e7f17"
+}

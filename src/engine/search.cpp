@@ -1,5 +1,6 @@
 #include "search.h"
 
+#include "human_prior.h"
 #include "see.h"
 
 #include <algorithm>
@@ -16,6 +17,9 @@ namespace proton {
 namespace {
 
 constexpr int RootPolicyScale = 24;
+constexpr double HumanPolicyScale = 0.20;
+constexpr double MaxBookPriorOdds = 16.0;
+constexpr double MaxHumanPriorOdds = 32.0;
 constexpr int QuietMateScanMaxPly = 3;
 
 struct HumanSettings {
@@ -36,7 +40,7 @@ HumanSettings resolved_human_settings(const EngineOptions& options) {
         };
     }
     return HumanSettings{
-        options.human_style || options.human_skill < 20,
+        options.human_style.value_or(options.human_skill < 20),
         std::clamp(options.human_skill, 0, 20),
         std::clamp(options.human_max_loss_cp, 0, 500),
         std::clamp(options.human_variety_percent, 0, 100),
@@ -1314,6 +1318,51 @@ bool Search::load_book_file(const std::string& path) {
     return true;
 }
 
+void Search::apply_human_book_priors(
+    const Position& position, std::vector<RootMove>& root_moves) const {
+    if (!options_.use_book || !resolved_human_settings(options_).enabled ||
+        !selection_opportunity_ || root_moves.empty()) return;
+    const auto found = book_.find(position.key());
+    if (found == book_.end()) return;
+
+    // Intersect with the generated legal root list, after searchmoves filtering.
+    // Even a malformed or heavily weighted custom entry cannot add a move.
+    std::vector<double> weights(root_moves.size(), 0.0);
+    for (const BookMove& entry : found->second) {
+        if (entry.weight <= 0) continue;
+        for (std::size_t index = 0; index < root_moves.size(); ++index) {
+            if (root_moves[index].move == entry.move) {
+                weights[index] += static_cast<double>(entry.weight);
+                break;
+            }
+        }
+    }
+    const double maximum = *std::max_element(weights.begin(), weights.end());
+    if (maximum <= 0.0) return;
+
+    // Preserve the book's temperature semantics: zero favours only its largest
+    // weights; 1..100 softens the same power law towards weighted variety.
+    // Scaling before pow also keeps INT_MAX custom weights numerically safe.
+    const int randomness = std::clamp(options_.book_randomness, 0, 100);
+    const double exponent = static_cast<double>(400 - 3 * randomness) / 100.0;
+    double total = 0.0;
+    for (double& weight : weights) {
+        weight = randomness == 0 ? (weight == maximum ? 1.0 : 0.0)
+                                 : std::pow(weight / maximum, exponent);
+        total += weight;
+    }
+    for (std::size_t index = 0; index < root_moves.size(); ++index) {
+        if (weights[index] <= 0.0) continue;
+        RootMove& move = root_moves[index];
+        // Mix a finite repertoire preference into the existing policy odds.
+        // No amount of book data can multiply a move's odds by more than 16;
+        // its search score and the verified loss allowance remain untouched.
+        move.book_prior = static_cast<float>(std::log1p(
+            (MaxBookPriorOdds - 1.0) * weights[index] / total));
+        move.policy += static_cast<float>(move.book_prior / HumanPolicyScale);
+    }
+}
+
 Move Search::select_book_move(const Position& position) {
     const auto found = book_.find(position.key());
     if (found == book_.end() || found->second.empty()) return Move::null();
@@ -1365,7 +1414,9 @@ Move Search::select_book_move(const Position& position) {
 }
 
 std::optional<SearchResult> Search::confirm_human_candidate(
-    const Position& position, const Move& candidate, int completed_depth) {
+    const Position& position, const Move& candidate, int completed_depth,
+    int* shallow_score) {
+    if (shallow_score != nullptr) *shallow_score = NoScore;
     if (candidate.is_null() || completed_depth <= 0 || should_stop(true)) {
         return std::nullopt;
     }
@@ -1409,7 +1460,12 @@ std::optional<SearchResult> Search::confirm_human_candidate(
         verifier_limits.node_limit = verifier_node_budget;
     }
 
-    SearchResult result = verifier.think(position, verifier_limits);
+    SearchResult result = verifier.think(position, verifier_limits,
+        [shallow_score](const SearchInfo& info) {
+            if (shallow_score != nullptr && info.depth == 2) {
+                *shallow_score = info.score_cp;
+            }
+        });
     const bool verifier_overran_parent = verifier_node_budget != 0 &&
         result.nodes > verifier_node_budget;
     nodes_ += verifier_overran_parent ? verifier_node_budget : result.nodes;
@@ -1453,23 +1509,63 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     const std::size_t candidate_limit = std::min<std::size_t>(
         root_moves.size(), static_cast<std::size_t>(6 + skill_gap));
 
+    std::vector<Move> moves;
+    moves.reserve(root_moves.size());
+    for (const RootMove& root : root_moves) moves.push_back(root.move);
+    const auto logits = human_move_logits(position, moves);
+    const float maximum_logit = *std::max_element(logits.begin(), logits.end());
+    std::vector<std::size_t> human_order(root_moves.size());
+    std::iota(human_order.begin(), human_order.end(), std::size_t{0});
+    std::stable_sort(human_order.begin(), human_order.end(), [&](auto lhs, auto rhs) {
+        return logits[lhs] > logits[rhs];
+    });
+    std::vector<bool> human_favourites(root_moves.size(), false);
+    for (std::size_t rank = 0; rank < std::min<std::size_t>(3, human_order.size()); ++rank) {
+        human_favourites[human_order[rank]] = true;
+    }
+
+    const auto repetitions_after = [&position](const Move& move) {
+        Position next = position;
+        UndoState undo;
+        if (!next.make_move(move, undo) || !next.is_repetition(2)) return 0;
+        return next.is_repetition(3) ? 3 : 2;
+    };
+    const bool incumbent_repeats = repetitions_after(root_moves.front().move) != 0;
+
     // Non-best PVS scores are bounds from a selective search, not comparable
     // full-window evaluations. Use them for sampling, then let a fresh
     // restricted iterative search decide whether an alternative is safe.
     std::vector<std::size_t> candidates;
     std::vector<double> weights;
-    for (std::size_t index = 0; index < candidate_limit; ++index) {
+    for (std::size_t index = 0; index < root_moves.size(); ++index) {
         const RootMove& move = root_moves[index];
+        if (index >= candidate_limit && move.book_prior <= 0.0F &&
+            !human_favourites[index]) continue;
         if (move.score == NoScore || (move.exact && move.score < threshold)) continue;
         candidates.push_back(index);
         // A fail-low bound can substantially understate a near-equal move.
-        // Bound its sampling penalty; confirmation enforces the actual loss.
+        // Mix repertoire odds into that provisional sampling penalty, in
+        // proportion to their weight, then confirm the actual loss by search.
+        // A tiny positive prior must not erase a dubious sideline's penalty.
         const int weighted_score = std::clamp(move.score, threshold, best_score);
-        const double eval_term = std::exp((weighted_score - best_score) / temperature);
-        const double policy_term = std::exp(static_cast<double>(move.policy) * 0.20);
+        double eval_term = std::exp((weighted_score - best_score) / temperature);
+        if (!move.exact && move.book_prior > 0.0F) {
+            const double book_odds = std::expm1(static_cast<double>(move.book_prior));
+            eval_term = (eval_term + book_odds) / (1.0 + book_odds);
+        }
+        const double policy_term = std::exp(static_cast<double>(move.policy) * HumanPolicyScale);
+        // The compact model learns move frequencies from club games. Bound its
+        // relative influence; learned popularity never overrides confirmation.
+        const double human_term = std::exp(std::clamp(
+            static_cast<double>(logits[index] - maximum_logit),
+            -std::log(MaxHumanPriorOdds), 0.0));
         const double rank_term = 1.0 / (1.0 + static_cast<double>(index) * 0.18);
         const double best_bias = index == 0 ? 1.0 + static_cast<double>(skill) * 0.55 : 1.0;
-        weights.push_back(eval_term * policy_term * rank_term * best_bias);
+        const int repetitions = repetitions_after(move.move);
+        const double repetition_term = repetitions == 3 ? 0.05 :
+                                       (repetitions == 2 ? 0.25 : 1.0);
+        weights.push_back(eval_term * policy_term * human_term * rank_term *
+                          best_bias * repetition_term);
     }
     if (candidates.size() <= 1) return root_moves.front().move;
 
@@ -1489,13 +1585,26 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
         const std::size_t index = candidates[slot];
         if (index == 0) return root_moves.front().move;
 
+        int shallow_score = NoScore;
         const std::optional<SearchResult> confirmed = confirm_human_candidate(
-            position, root_moves[index].move, completed_depth);
+            position, root_moves[index].move, completed_depth, &shallow_score);
         if (!confirmed.has_value()) return root_moves.front().move;
         root_moves[index].score = confirmed->score_cp;
         root_moves[index].exact = true;
         root_moves[index].pv = confirmed->pv;
-        if (confirmed->score_cp >= threshold) return root_moves[index].move;
+        // A club player's meaningful mistake should survive a short look. Use
+        // the verifier's existing depth-two iteration, without spending a
+        // second search or treating root PVS bounds as comparable evaluations.
+        const bool plausible = best_score - confirmed->score_cp <= 25 ||
+            (human_shallow_best_ != NoScore && shallow_score != NoScore &&
+             shallow_score >= human_shallow_best_ - 35);
+        // Prefer continuing an equal or better game over cycling, but never
+        // give up a searched drawing repetition for an intentional loss.
+        const bool preserves_repetition = !incumbent_repeats ||
+            confirmed->score_cp >= best_score;
+        if (confirmed->score_cp >= threshold && plausible && preserves_repetition) {
+            return root_moves[index].move;
+        }
 
         candidates.erase(candidates.begin() + static_cast<std::ptrdiff_t>(slot));
         weights.erase(weights.begin() + static_cast<std::ptrdiff_t>(slot));
@@ -1519,6 +1628,7 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     main_budget_exhausted_ = false;
     selection_budget_reserved_ = false;
     selection_opportunity_ = false;
+    human_shallow_best_ = NoScore;
     const HumanSettings active_human = resolved_human_settings(options_);
     selection_opportunity_ = human_selection_opportunity(active_human, random_);
     main_phase_ = selection_opportunity_ && human_loss_allowance(active_human) > 0;
@@ -1591,6 +1701,7 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
         root_moves.push_back(RootMove{legal_moves[index], NoScore, NoScore,
                                      index < policies.size() ? policies[index] : 0.0F, false, {}});
     }
+    apply_human_book_priors(position, root_moves);
 
     // Seed root ordering with the transposition move, then policy/history.
     Move root_tt_move = Move::null();
@@ -1650,6 +1761,7 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
         completed_depth = depth;
         completed_root_moves = root_moves;
         previous_score = root_moves.front().score;
+        if (depth == 2) human_shallow_best_ = previous_score;
         completed_pv = root_moves.front().pv;
         if (completed_pv.empty()) completed_pv = current_pv(0);
 

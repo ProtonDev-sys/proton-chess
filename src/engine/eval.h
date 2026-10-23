@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -53,7 +54,9 @@ struct EngineOptions {
     int book_randomness = 0;       // 0 = best-weight line, 100 = full weighted variety.
     bool uci_limit_strength = false;
     int uci_elo = UciEloDefault;
-    bool human_style = false;
+    // Unset preserves the legacy Skill Level behaviour. Explicit false always
+    // disables style, including when a GUI has retained a lower skill value.
+    std::optional<bool> human_style;
     int human_skill = 20;          // 0..20. 20 only varies between near-equal moves.
     int human_max_loss_cp = 12;    // Maximum intentional loss at skill 20.
     int human_variety_percent = 35;  // Chance to consider a verified alternative.
@@ -61,6 +64,15 @@ struct EngineOptions {
     int contempt_cp = 0;
     std::uint64_t human_seed = 0;
 };
+
+[[nodiscard]] inline EngineOptions club_play_options() {
+    EngineOptions options;
+    options.human_style = true;
+    options.human_skill = 16;
+    options.human_variety_percent = 60;
+    options.book_randomness = 70;
+    return options;
+}
 
 class StaticEvaluator {
 public:

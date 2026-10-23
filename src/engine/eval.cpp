@@ -598,6 +598,50 @@ std::vector<float> Evaluator::policy_scores(
         return (opposing_pawns & file) == 0 ? 1.2F : 0.7F;
     };
 
+    // A pawn-structure target survives quiet piece moves without game-history
+    // state. Stop an advanced enemy passer first; otherwise support our own.
+    int plan_pawn = NoSquare;
+    Color plan_color = NoColor;
+    if (king_endgame) {
+        for (Color color : {enemy, side}) {
+            const Bitboard pawns = position.pieces(make_piece(color, Pawn));
+            const Bitboard opposing =
+                position.pieces(make_piece(opposite(color), Pawn));
+            Bitboard candidates = pawns;
+            int best_priority = -1;
+            while (candidates != 0) {
+                const int square = static_cast<int>(std::countr_zero(candidates));
+                candidates &= candidates - 1;
+                const int rr = relative_rank(color, square);
+                const Bitboard forward_file = PassedPawnMasks[color][square] &
+                    (0x0101010101010101ULL << file_of(square));
+                if (rr < 4 || rr > 6 || (pawns & forward_file) != 0 ||
+                    !is_passed_pawn(opposing, color, square)) continue;
+
+                // Advancement, then file, gives the same target after colour
+                // reversal, regardless of bitboard traversal order.
+                const int priority = rr * 8 + 7 - file_of(square);
+                if (priority > best_priority) {
+                    best_priority = priority;
+                    plan_pawn = square;
+                    plan_color = color;
+                }
+            }
+            if (plan_pawn != NoSquare) break;
+        }
+    }
+    const int king_goal = plan_color == enemy
+        ? plan_pawn + (enemy == White ? 8 : -8) : plan_pawn;
+    const auto king_distance = [&](int square) {
+        return std::max(std::abs(file_of(square) - file_of(king_goal)),
+                        std::abs(rank_of(square) - rank_of(king_goal)));
+    };
+    const auto behind_passer = [&](int square, Bitboard occupied) {
+        return file_of(square) == file_of(plan_pawn) &&
+               relative_rank(side, square) < relative_rank(side, plan_pawn) &&
+               (attacks::rook(plan_pawn, occupied) & bit(square)) != 0;
+    };
+
     for (const Move& move : moves) {
         const Piece piece = position.piece_at(move.from);
         const PieceType type = piece_type(piece);
@@ -680,6 +724,19 @@ std::vector<float> Evaluator::policy_scores(
             // Seek a better file without rewarding shuffles along an open one.
             score += rook_file_score(move.to, enemy_pawns & ~bit(move.to)) -
                      rook_file_score(move.from, enemy_pawns);
+        }
+        if (plan_pawn != NoSquare && quiet_tempo && !move.is_castle()) {
+            if (type == King) {
+                score += static_cast<float>(king_distance(move.from) -
+                                            king_distance(move.to)) * 0.65F;
+            } else if (type == Rook && plan_color == side) {
+                const Bitboard occupied = position.occupancy_all();
+                // Enough to prefer supporting the passer to an empty file,
+                // but bounded to one small improvement, with no shuffle bonus.
+                score += 2.4F * static_cast<float>(
+                    static_cast<int>(behind_passer(move.to, occupied & ~bit(move.from))) -
+                    static_cast<int>(behind_passer(move.from, occupied)));
+            }
         }
         if (king_endgame && type == Pawn && !move.is_promotion()) {
             // Advance a true passer, rather than a rear doubled pawn.

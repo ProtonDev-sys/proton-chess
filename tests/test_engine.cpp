@@ -952,7 +952,7 @@ void test_search_tactics() {
     proton::EngineOptions elo_3000_options = full_options;
     elo_3000_options.uci_limit_strength = true;
     elo_3000_options.uci_elo = 3000;
-    elo_3000_options.human_seed = 394;
+    elo_3000_options.human_seed = 1555;
     proton::Evaluator elo_3000_evaluator;
     elo_3000_evaluator.set_options(elo_3000_options);
     auto elo_3000_search =
@@ -1001,8 +1001,8 @@ void test_search_tactics() {
     expect(interrupted_result.nodes > interrupted_limits.node_limit / 2 &&
                interrupted_result.nodes <= interrupted_limits.node_limit,
            "confirmation uses the reserve without exceeding the total node limit");
-    expect(interrupted_result.best != full_result.best,
-           "node-limited human play can return a real alternative");
+    expect(interrupted_result.best == full_result.best,
+           "node-limited human play rejects an obvious error despite its loose loss allowance");
     const int interrupted_best_score =
         exact_score_for(full_result.best, interrupted_result.depth);
     const int interrupted_selected_score =
@@ -1108,6 +1108,21 @@ void test_search_tactics() {
                zero_variety_result.nodes == full_node_result.nodes,
            "HumanVariety 0 bypasses confirmation reservation and keeps the full "
            "bounded search budget");
+
+    proton::EngineOptions disabled_style_options = interrupted_options;
+    disabled_style_options.human_style = false;
+    proton::Evaluator disabled_style_evaluator;
+    auto disabled_style_search = std::make_unique<proton::Search>(
+        disabled_style_evaluator, disabled_style_options);
+    const proton::SearchResult disabled_style_result =
+        disabled_style_search->think(full_node_position, full_node_limits);
+    expect(disabled_style_result.best == full_node_result.best &&
+               disabled_style_result.score_cp == full_node_result.score_cp &&
+               disabled_style_result.depth == full_node_result.depth &&
+               disabled_style_result.nodes == full_node_result.nodes &&
+               disabled_style_result.pv == full_node_result.pv,
+           "explicit HumanStyle false disables a retained lower skill without "
+           "reserving budget or changing deterministic analysis");
 
     proton::Evaluator elo_3000_node_evaluator;
     elo_3000_node_evaluator.set_options(elo_3000_options);

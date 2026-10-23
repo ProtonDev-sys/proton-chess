@@ -134,14 +134,14 @@ def check_limiter_option_state(binary: Path) -> None:
         "setoption name Threads value 1",
         "setoption name UseBook value true",
         "setoption name BookFile value openings/book_lines.txt",
-        "setoption name BookRandomness value 0",
+        "setoption name BookRandomness value 70",
         "setoption name UCI_LimitStrength value false",
         "setoption name UCI_Elo value 2800",
-        "setoption name Skill Level value 20",
-        "setoption name HumanStyle value false",
-        "setoption name HumanSkill value 20",
+        "setoption name Skill Level value 16",
+        "setoption name HumanStyle value true",
+        "setoption name HumanSkill value 16",
         "setoption name HumanMaxLossCp value 12",
-        "setoption name HumanVariety value 35",
+        "setoption name HumanVariety value 60",
         "setoption name HumanSeed value 0",
         "setoption name MoveOverhead value 25",
         "setoption name Contempt value 0",
@@ -149,7 +149,7 @@ def check_limiter_option_state(binary: Path) -> None:
     ])
     skill_round_trip = fixed_depth_move(binary, [
         "setoption name HumanSkill value 0",
-        "setoption name HumanSkill value 20",
+        "setoption name HumanSkill value 16",
         seed,
     ])
     disabled_uci_elo = fixed_depth_move(binary, [
@@ -163,10 +163,19 @@ def check_limiter_option_state(binary: Path) -> None:
         "setoption name HumanVariety value 0",
         seed,
     ])
+    full_strength = fixed_depth_move(binary, [
+        "setoption name HumanStyle value false", seed,
+    ])
+    disabled_low_skill = fixed_depth_move(binary, [
+        "setoption name HumanStyle value false",
+        "setoption name HumanSkill value 0",
+        "setoption name HumanVariety value 100", seed,
+    ])
     assert replayed_defaults == fresh, (fresh, replayed_defaults)
     assert skill_round_trip == fresh, (fresh, skill_round_trip)
     assert disabled_uci_elo == fresh, (fresh, disabled_uci_elo)
-    assert zero_variety == fresh, (fresh, zero_variety)
+    assert zero_variety == full_strength, (full_strength, zero_variety)
+    assert disabled_low_skill == full_strength, (full_strength, disabled_low_skill)
 
     custom = [
         "setoption name HumanStyle value true",
@@ -207,7 +216,7 @@ def check_human_final_info(binary: Path) -> None:
         engine.wait_for(lambda line: line == "uciok")
         for option in (
             "Hash value 1", "UseBook value false", "UCI_LimitStrength value true",
-            "UCI_Elo value 3000", "HumanSeed value 394",
+            "UCI_Elo value 3000", "HumanSeed value 1555",
         ):
             engine.send("setoption name " + option)
         engine.send("position fen rnbqk1nr/ppp2p2/3pp1pp/8/2P1P3/2PPBN2/P4PPP/R2QKB1R b KQkq - 0 7")
@@ -240,11 +249,15 @@ def main() -> int:
         _, uci_lines = engine.wait_for(lambda line: line == "uciok")
         assert any("option name Threads type spin default 1 min 1 max 1" in line
                    for line in uci_lines)
-        assert any("option name BookRandomness type spin default 0 min 0 max 100" in line
+        assert any("option name BookRandomness type spin default 70 min 0 max 100" in line
                    for line in uci_lines)
         assert any("option name UCI_Elo type spin default 2800 min 800 max 3000" in line
                    for line in uci_lines)
-        assert any("option name HumanVariety type spin default 35 min 0 max 100" in line
+        assert any("option name HumanStyle type check default true" in line
+                   for line in uci_lines)
+        assert any("option name HumanSkill type spin default 16 min 0 max 20" in line
+                   for line in uci_lines)
+        assert any("option name HumanVariety type spin default 60 min 0 max 100" in line
                    for line in uci_lines)
         assert not any("option name Backend" in line for line in uci_lines)
         assert not any("option name SyzygyPath" in line for line in uci_lines)

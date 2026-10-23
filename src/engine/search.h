@@ -125,6 +125,7 @@ private:
         float policy = 0.0F;
         bool exact = false;
         std::vector<Move> pv;
+        float book_prior = 0.0F;
     };
 
     struct BookMove {
@@ -162,6 +163,7 @@ private:
     bool main_budget_exhausted_ = false;
     bool selection_budget_reserved_ = false;
     bool selection_opportunity_ = false;
+    int human_shallow_best_ = NoScore;
 
     std::array<std::array<Move, 2>, MaxPly> killers_{};
     std::array<std::array<std::array<int, 64>, 64>, 2> history_{};
@@ -242,11 +244,14 @@ private:
     bool load_book_file(const std::string& path);
     void add_book_line(const std::vector<std::string>& moves, int weight);
     [[nodiscard]] Move select_book_move(const Position& position);
+    void apply_human_book_priors(const Position& position,
+                                std::vector<RootMove>& root_moves) const;
     [[nodiscard]] Move select_human_move(const Position& position,
                                          std::vector<RootMove>& root_moves,
                                          int completed_depth);
     [[nodiscard]] std::optional<SearchResult> confirm_human_candidate(
-        const Position& position, const Move& candidate, int completed_depth);
+        const Position& position, const Move& candidate, int completed_depth,
+        int* shallow_score = nullptr);
 
     [[nodiscard]] int draw_score(const Position& position) const;
     [[nodiscard]] int rule50_score(Position& position, int ply, bool in_check);

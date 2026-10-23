@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -29,6 +30,11 @@ float policy_for(proton::Evaluator& evaluator, proton::Position& position,
     expect(scores.size() == legal.size(), "policy score count matches legal moves");
     expect(scores == evaluator.policy_scores(position, legal),
            "policy is deterministic: " + uci);
+    std::reverse(legal.begin(), legal.end());
+    const std::vector<float> reversed = evaluator.policy_scores(position, legal);
+    expect(std::equal(scores.begin(), scores.end(), reversed.rbegin(), reversed.rend()),
+           "policy scores do not depend on move-list order: " + uci);
+    std::reverse(legal.begin(), legal.end());
     expect(position.fen() == before && position.key() == key,
            "policy preserves the input position: " + uci);
     for (std::size_t index = 0; index < legal.size(); ++index) {
@@ -251,6 +257,99 @@ void test_endgame_passed_pawn_progress() {
            "rear doubled pawn receives no progress bonus behind its own pawn");
 }
 
+void test_passer_support_plan() {
+    proton::Evaluator evaluator;
+    const std::string passer = "7k/8/P7/8/8/8/4K3/5R2 w - - 0 20";
+    const float support = symmetric_policy(evaluator, passer, "f1a1");
+    expect(support > symmetric_policy(evaluator, passer, "f1c1") + 0.3F,
+           "rook supports the advanced passer ahead of choosing an empty file");
+
+    const float blocked = symmetric_policy(
+        evaluator, "7k/8/P7/8/8/P7/4K3/5R2 w - - 0 20", "f1a1");
+    const float piece_blocked = symmetric_policy(
+        evaluator, "7k/8/P7/8/8/N7/4K3/5R2 w - - 0 20", "f1a1");
+    const float unadvanced = symmetric_policy(
+        evaluator, "7k/8/8/8/P7/8/4K3/5R2 w - - 0 20", "f1a1");
+    expect(support > blocked + 2.0F &&
+               std::abs(blocked - piece_blocked) < 0.001F &&
+               std::abs(blocked - unadvanced) < 0.001F,
+           "support requires a clear ray to the advanced leading passer");
+
+    const float shuffling = symmetric_policy(
+        evaluator, "7k/8/P7/8/8/8/4K3/R7 w - - 0 20", "a1a2");
+    const float bare_shuffling = symmetric_policy(
+        evaluator, "7k/8/8/8/8/8/4K3/R7 w - - 0 20", "a1a2");
+    expect(std::abs(shuffling - bare_shuffling) < 0.001F,
+           "rook already behind the passer gains no bonus for shuffling");
+    const float ahead = symmetric_policy(
+        evaluator, "7k/8/8/4R3/P7/8/4K3/8 w - - 0 20", "e5a5");
+    const float advanced_ahead = symmetric_policy(
+        evaluator, "7k/4R3/P7/8/8/8/4K3/8 w - - 0 20", "e7a7");
+    // Both moves lose the same centralisation and file access. Only the second
+    // has an advanced passer, and neither rook destination is behind it.
+    expect(std::abs(ahead - advanced_ahead) < 0.001F,
+           "moving in front of a passer is not support from behind");
+}
+
+void test_king_pawn_plan() {
+    proton::Evaluator evaluator;
+    const std::string own = "7k/8/P7/8/8/8/4K3/8 w - - 0 20";
+    const std::string enemy = "7k/8/8/8/7p/8/4K3/8 w - - 0 20";
+    const float own_approach = symmetric_policy(evaluator, own, "e2d3");
+    expect(own_approach > symmetric_policy(evaluator, own, "e2e3") + 0.5F,
+           "king approaches its advanced passer instead of only centralising");
+    expect(symmetric_policy(evaluator, enemy, "e2f3") >
+               symmetric_policy(evaluator, enemy, "e2d3") + 0.5F,
+           "king heads toward the enemy passer to stop it");
+
+    const std::string both = "7k/8/P7/8/7p/8/4K3/8 w - - 0 20";
+    expect(std::abs(symmetric_policy(evaluator, both, "e2f3") -
+                    symmetric_policy(evaluator, enemy, "e2f3")) < 0.001F &&
+               symmetric_policy(evaluator, both, "e2f3") >
+                   symmetric_policy(evaluator, both, "e2d3") + 0.5F,
+           "stopping the enemy passer takes priority over supporting our own");
+
+    const std::string tied = "7k/8/P6P/8/8/8/4K3/8 w - - 0 20";
+    const std::string doubled = "7k/8/P7/8/8/P7/4K3/8 w - - 0 20";
+    expect(std::abs(symmetric_policy(evaluator, tied, "e2d3") -
+                    own_approach) < 0.001F &&
+               std::abs(symmetric_policy(evaluator, doubled, "e2d3") -
+                        own_approach) < 0.001F,
+           "equal passers use a fixed file tiebreak and rear pawns do not retarget");
+    expect(std::abs(symmetric_policy(evaluator,
+               "7k/7P/P7/8/8/8/4K3/8 w - - 0 20", "e2f3") -
+                   symmetric_policy(evaluator,
+               "7k/7P/8/8/8/8/4K3/8 w - - 0 20", "e2f3")) < 0.001F,
+           "the more advanced passer wins before the file tiebreak");
+}
+
+void test_pawn_plan_scope() {
+    proton::Evaluator evaluator;
+    struct Fixture {
+        const char* with_pawn;
+        const char* without_pawn;
+        const char* context;
+    };
+    const Fixture fixtures[] = {
+        {"q6k/8/P7/8/8/8/4K3/8 w - - 0 20",
+         "q6k/8/8/8/8/8/4K3/8 w - - 0 20", "queen present"},
+        {"7k/8/P7/8/8/8/4K3/RRRR1R2 w - - 0 20",
+         "7k/8/8/8/8/8/4K3/RRRR1R2 w - - 0 20", "substantial material"},
+        {"7k/1p6/P7/8/8/8/4K3/8 w - - 0 20",
+         "7k/1p6/8/8/8/8/4K3/8 w - - 0 20", "pawn is not passed"},
+        {"7k/8/8/8/P7/8/4K3/8 w - - 0 20",
+         "7k/8/8/8/8/8/4K3/8 w - - 0 20", "pawn is not advanced"},
+        {"4r2k/8/P7/8/8/8/4K3/8 w - - 0 20",
+         "4r2k/8/8/8/8/8/4K3/8 w - - 0 20", "king evades check"},
+    };
+    for (const Fixture& fixture : fixtures) {
+        expect(std::abs(symmetric_policy(evaluator, fixture.with_pawn, "e2d3") -
+                        symmetric_policy(evaluator, fixture.without_pawn, "e2d3")) <
+                   0.001F,
+               std::string("pawn plan does not apply: ") + fixture.context);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -261,6 +360,9 @@ int main() {
     test_centralisation_improvement();
     test_rook_file_improvement();
     test_endgame_passed_pawn_progress();
+    test_passer_support_plan();
+    test_king_pawn_plan();
+    test_pawn_plan_scope();
 
     if (failures != 0) {
         std::cerr << failures << " human-policy test(s) failed\n";
