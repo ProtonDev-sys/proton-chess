@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(proton_chess VERSION 0.3.2 LANGUAGES CXX)
+project(proton_chess VERSION 0.3.3 LANGUAGES CXX)
 
 option(PROTON_NATIVE "Tune release builds for the current CPU" OFF)
 option(PROTON_LTO "Enable link-time optimisation when supported" ON)

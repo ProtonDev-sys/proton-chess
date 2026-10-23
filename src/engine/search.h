@@ -183,7 +183,6 @@ private:
     std::unordered_map<std::uint64_t, std::vector<BookMove>> book_{};
     std::mt19937_64 random_{};
     Color root_side_ = White;
-    bool verification_search_ = false;
 
     void resize_hash(int megabytes);
     void clear_hash();

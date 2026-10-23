@@ -734,15 +734,13 @@ int Search::quiescence(Position& position, int alpha, int beta, int ply) {
     if (TTEntry* entry = probe(key)) {
         entry->generation = generation_;
         tt_move = entry->move;
-        if (!verification_search_) {
-            tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
-            tt_score = score_from_tt(entry->score, ply);
-            tt_bound = entry->bound;
-            if (!rule50_sensitive && entry->depth >= 0) {
-                if (entry->bound == Bound::Exact) return tt_score;
-                if (entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
-                if (entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
-            }
+        tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
+        tt_score = score_from_tt(entry->score, ply);
+        tt_bound = entry->bound;
+        if (!rule50_sensitive && entry->depth >= 0) {
+            if (entry->bound == Bound::Exact) return tt_score;
+            if (entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
+            if (entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
         }
     }
 
@@ -902,16 +900,14 @@ int Search::alpha_beta(Position& position, int depth, int alpha, int beta, int p
     if (TTEntry* entry = probe(key)) {
         entry->generation = generation_;
         tt_move = entry->move;
-        if (!verification_search_) {
-            tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
-            tt_score = score_from_tt(entry->score, ply);
-            tt_bound = entry->bound;
-            tt_depth = entry->depth;
-            if (!excluded && !rule50_sensitive && entry->depth >= depth) {
-                if (entry->bound == Bound::Exact) return tt_score;
-                if (!pv_node && entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
-                if (!pv_node && entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
-            }
+        tt_static_eval = entry->static_eval == TTNoEval ? NoScore : entry->static_eval;
+        tt_score = score_from_tt(entry->score, ply);
+        tt_bound = entry->bound;
+        tt_depth = entry->depth;
+        if (!excluded && !rule50_sensitive && entry->depth >= depth) {
+            if (entry->bound == Bound::Exact) return tt_score;
+            if (!pv_node && entry->bound == Bound::Lower && tt_score >= beta) return tt_score;
+            if (!pv_node && entry->bound == Bound::Upper && tt_score <= alpha) return tt_score;
         }
     }
 
@@ -1457,59 +1453,18 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     const std::size_t candidate_limit = std::min<std::size_t>(
         root_moves.size(), static_cast<std::size_t>(6 + skill_gap));
 
-    // PVS and aspiration windows can leave bounds on every non-best root move.
-    // Use a cheap narrow search to filter the weighted pool. Any sampled
-    // alternative is then confirmed by a fresh restricted iterative search
-    // before it can be returned.
-    std::vector<bool> eligible(candidate_limit, false);
-    eligible.front() = true;
-    if (selection_budget_reserved_) {
-        // Root PVS scores are provisional here. Sample from plausible moves and
-        // spend the reserved budget on the one fresh search that can admit it.
-        for (std::size_t index = 1; index < candidate_limit; ++index) {
-            const RootMove& candidate = root_moves[index];
-            eligible[index] = candidate.score != NoScore && candidate.score >= threshold;
-        }
-    } else {
-        for (std::size_t index = 1; index < candidate_limit; ++index) {
-            RootMove& candidate = root_moves[index];
-            if (eligible[index] || candidate.score == NoScore ||
-                candidate.score < threshold) {
-                continue;
-            }
-            if (should_stop(true)) break;
-
-            Position copy = position;
-            UndoState undo;
-            if (!copy.make_move(candidate.move, undo)) {
-                candidate.score = NoScore;
-                continue;
-            }
-            move_stack_[0] = candidate.move;
-            moved_piece_stack_[0] = copy.piece_at(candidate.move.to);
-            const int prior_score = candidate.score;
-            verification_search_ = true;
-            const int verified = -alpha_beta(copy, completed_depth - 1,
-                                             -threshold, -threshold + 1, 1,
-                                             true, false, true, candidate.move);
-            verification_search_ = false;
-            if (search_aborted()) break;
-            if (verified < threshold) {
-                candidate.score = verified;
-                continue;
-            }
-            candidate.score = std::max(prior_score, threshold);
-            eligible[index] = true;
-        }
-    }
-
+    // Non-best PVS scores are bounds from a selective search, not comparable
+    // full-window evaluations. Use them for sampling, then let a fresh
+    // restricted iterative search decide whether an alternative is safe.
     std::vector<std::size_t> candidates;
     std::vector<double> weights;
     for (std::size_t index = 0; index < candidate_limit; ++index) {
         const RootMove& move = root_moves[index];
-        if (!eligible[index]) continue;
+        if (move.score == NoScore || (move.exact && move.score < threshold)) continue;
         candidates.push_back(index);
-        const int weighted_score = std::min(best_score, move.score);
+        // A fail-low bound can substantially understate a near-equal move.
+        // Bound its sampling penalty; confirmation enforces the actual loss.
+        const int weighted_score = std::clamp(move.score, threshold, best_score);
         const double eval_term = std::exp((weighted_score - best_score) / temperature);
         const double policy_term = std::exp(static_cast<double>(move.policy) * 0.20);
         const double rank_term = 1.0 / (1.0 + static_cast<double>(index) * 0.18);
@@ -1522,9 +1477,15 @@ Move Search::select_human_move(const Position& position, std::vector<RootMove>& 
     for (int attempt = 0;
          attempt < max_confirmations && candidates.size() > 1;
          ++attempt) {
-        std::discrete_distribution<std::size_t> distribution(
-            weights.begin(), weights.end());
-        const std::size_t slot = distribution(random_);
+        // Match the book's specified 53-bit sampling rule so HumanSeed also
+        // reproduces move choices across standard-library implementations.
+        constexpr double InverseTwoTo53 = 1.0 / 9007199254740992.0;
+        double target = static_cast<double>(random_() >> 11U) * InverseTwoTo53 *
+                        std::accumulate(weights.begin(), weights.end(), 0.0);
+        std::size_t slot = 0;
+        while (slot + 1 < weights.size() && target >= weights[slot]) {
+            target -= weights[slot++];
+        }
         const std::size_t index = candidates[slot];
         if (index == 0) return root_moves.front().move;
 
@@ -1744,6 +1705,13 @@ SearchResult Search::think(Position position, const SearchLimits& limits,
     result.nodes = nodes_;
     result.time_ms = elapsed_ms();
     if (result.pv.size() >= 2) result.ponder = result.pv[1];
+    if (callback && result.best != previous_best && completed_depth > 0) {
+        const int time = std::max(1, result.time_ms);
+        callback(SearchInfo{result.depth, result.selective_depth, result.score_cp,
+                            result.nodes,
+                            result.nodes * 1000ULL / static_cast<std::uint64_t>(time),
+                            time, hashfull(), result.pv});
+    }
     return result;
 }
 

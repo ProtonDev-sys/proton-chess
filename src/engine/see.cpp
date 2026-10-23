@@ -102,8 +102,24 @@ struct LeastValuableAttacker {
                 const Bitboard source_bit = bit(square);
                 pieces[piece_index(pawn)] &= ~source_bit;
                 const Bitboard occupied_after = occupied & ~source_bit;
-                const bool can_be_recaptured =
-                    (attacks::attackers_to(target, occupied_after, pieces) & enemy) != 0;
+                const Bitboard recapturers =
+                    attacks::attackers_to(target, occupied_after, pieces) & enemy;
+                bool can_be_recaptured = false;
+                // Pinned pieces still attack squares for king safety, but
+                // cannot recapture the promoted pawn without exposing a king.
+                for (int type = Pawn; type <= King && !can_be_recaptured; ++type) {
+                    const Piece recapturing_piece =
+                        make_piece(opposite(color), static_cast<PieceType>(type));
+                    Bitboard sources = recapturers & pieces[piece_index(recapturing_piece)];
+                    while (sources != 0 && !can_be_recaptured) {
+                        const int source = static_cast<int>(std::countr_zero(sources));
+                        sources &= sources - 1;
+                        can_be_recaptured = legal_recapture(
+                            target, source, recapturing_piece, occupied_after,
+                            remaining_by_color[color] & ~source_bit,
+                            pieces, king_squares, opposite(color));
+                    }
+                }
                 pieces[piece_index(pawn)] |= source_bit;
                 if (!can_be_recaptured) return {pawn, square};
             }

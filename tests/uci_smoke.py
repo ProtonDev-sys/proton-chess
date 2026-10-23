@@ -200,6 +200,27 @@ def check_limiter_option_state(binary: Path) -> None:
     assert sensitivity_exercised
 
 
+def check_human_final_info(binary: Path) -> None:
+    engine = EngineProcess(binary)
+    try:
+        engine.send("uci")
+        engine.wait_for(lambda line: line == "uciok")
+        for option in (
+            "Hash value 1", "UseBook value false", "UCI_LimitStrength value true",
+            "UCI_Elo value 3000", "HumanSeed value 394",
+        ):
+            engine.send("setoption name " + option)
+        engine.send("position fen rnbqk1nr/ppp2p2/3pp1pp/8/2P1P3/2PPBN2/P4PPP/R2QKB1R b KQkq - 0 7")
+        engine.send("go depth 3")
+        bestmove, lines = engine.wait_for(lambda line: line.startswith("bestmove "))
+        assert bestmove.split()[1] == "c7c5", (bestmove, lines)
+        infos = [line.split() for line in lines if line.startswith("info depth ")]
+        assert infos[-1][infos[-1].index("pv") + 1] == "c7c5", lines
+        assert infos[-1][infos[-1].index("score") + 2] == "-71", lines
+    finally:
+        engine.close()
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: uci_smoke.py /path/to/proton_chess", file=sys.stderr)
@@ -211,6 +232,7 @@ def main() -> int:
 
     check_immediate_stop(binary)
     check_limiter_option_state(binary)
+    check_human_final_info(binary)
 
     engine = EngineProcess(binary)
     try:

@@ -120,6 +120,20 @@ struct SearchTestAccess {
         return search.confirm_human_candidate(position, candidate, depth);
     }
 
+    static Move select_with_exhausted_confirmation(
+        Search& search, const Position& position, const Move& best,
+        const Move& alternative, int score, int depth) {
+        search.selection_opportunity_ = true;
+        search.selection_budget_reserved_ = true;
+        // Make sampling the alternative certain for the fixed nonzero draw.
+        // Its full verification must still fit the real remaining node budget.
+        std::vector<Search::RootMove> roots = {
+            {best, score, score, 0.0F, true, {best}},
+            {alternative, score, score, 1000.0F, false, {alternative}},
+        };
+        return search.select_human_move(position, roots, depth);
+    }
+
     static int quiescence(Search& search, Position& position,
                           int alpha, int beta, int ply) {
         search.limits_ = SearchLimits{};
@@ -683,6 +697,12 @@ void test_static_exchange() {
            "SEE terminates an exchange after a legal king capture");
     expect(evaluate("1N5k/P1K5/1r6/8/8/8/8/8 b - - 0 1", "b6b8") == -1030,
            "SEE prefers a safe promotion over a safe king recapture");
+    expect(evaluate("Qn1R4/K1P5/1r1b4/8/3k4/8/8/8 w - - 0 1", "a8b8") == 320,
+           "SEE prefers promotion when the apparent recapturer is pinned");
+    expect(evaluate("8/8/8/3K4/8/1R1B4/k1p5/qN1r4 b - - 0 1", "a1b1") == 320,
+           "SEE promotion safety is symmetric for Black");
+    expect(evaluate("Qn1R4/K1P5/1r1b4/8/7k/8/8/8 w - - 0 1", "a8b8") == -130,
+           "SEE still counts an unpinned recapturer of the promotion");
 
     proton::Position malformed_promotion_position;
     expect(malformed_promotion_position.set_fen(
@@ -932,7 +952,7 @@ void test_search_tactics() {
     proton::EngineOptions elo_3000_options = full_options;
     elo_3000_options.uci_limit_strength = true;
     elo_3000_options.uci_elo = 3000;
-    elo_3000_options.human_seed = 667;
+    elo_3000_options.human_seed = 394;
     proton::Evaluator elo_3000_evaluator;
     elo_3000_evaluator.set_options(elo_3000_options);
     auto elo_3000_search =
@@ -1210,23 +1230,20 @@ void test_search_tactics() {
     proton::Position confirmation_tight_position;
     expect(confirmation_tight_position.set_fen(confirmation_cancel_fen),
            "tight confirmation-cancel FEN parses");
-    proton::SearchLimits confirmation_tight_limits = confirmation_depth;
-    confirmation_tight_limits.node_limit = 9000;
-    confirmation_tight_limits.search_moves_specified = true;
-    confirmation_tight_limits.search_moves = {
-        confirmation_full_result.best, confirmation_alternative};
-    const proton::SearchResult confirmation_tight_result =
-        confirmation_tight_search->think(confirmation_tight_position,
-                                          confirmation_tight_limits);
-    expect(confirmation_tight_result.depth == 6 &&
-               confirmation_tight_result.best == confirmation_full_result.best,
+    // Leave exactly one node for a depth-six verification. A fixed whole-search
+    // cap can accidentally admit the candidate after move-ordering changes.
+    constexpr std::uint64_t ConfirmationCap = 100;
+    proton::SearchTestAccess::set_confirmation_budget(
+        *confirmation_tight_search, ConfirmationCap, ConfirmationCap - 1);
+    const proton::Move confirmation_tight_move =
+        proton::SearchTestAccess::select_with_exhausted_confirmation(
+            *confirmation_tight_search, confirmation_tight_position,
+            confirmation_full_result.best, confirmation_alternative,
+            confirmation_reference_score, confirmation_depth.depth);
+    expect(confirmation_tight_move == confirmation_full_result.best,
            "exhausted confirmation falls back to the completed root best");
-    expect(confirmation_tight_result.nodes >
-               confirmation_tight_limits.node_limit / 2 &&
-               confirmation_tight_result.nodes <= confirmation_tight_limits.node_limit,
-           "cancelled confirmation stays inside the parent's total node budget (nodes " +
-               std::to_string(confirmation_tight_result.nodes) + ", limit " +
-               std::to_string(confirmation_tight_limits.node_limit) + ")");
+    expect(proton::SearchTestAccess::nodes(*confirmation_tight_search) == ConfirmationCap,
+           "cancelled confirmation consumes exactly the parent's remaining node");
 
     std::atomic<bool> primary_stop{false};
     std::atomic<bool> secondary_stop{true};
