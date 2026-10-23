@@ -1,0 +1,53 @@
+name: Attack optimization evidence
+
+on:
+  pull_request:
+    paths:
+      - 'src/engine/attacks.h'
+      - 'tests/test_attacks.cpp'
+      - 'tools/benchmark_attacks.cpp'
+      - '.github/workflows/attack-optimization.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: baseline
+          persist-credentials: false
+      - name: Build both revisions
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPROTON_BUILD_TESTS=OFF
+          cmake --build build --parallel 2
+          cmake -S baseline -B baseline/build -DCMAKE_BUILD_TYPE=Release -DPROTON_BUILD_TESTS=OFF
+          cmake --build baseline/build --parallel 2
+          mkdir -p build/bench
+      - name: Measure slider microbenchmark
+        run: |
+          c++ -std=c++20 -O3 -Isrc tools/benchmark_attacks.cpp -o build/benchmark-attacks
+          build/benchmark-attacks
+      - name: Compare deterministic engine searches
+        run: |
+          git rev-parse HEAD
+          git -C baseline rev-parse HEAD
+          python tools/compare_search.py build/proton_chess baseline/build/proton_chess --openings openings/uho_lichess_4852_v1_200.epd --depth 6 --hash 16 --trials 2 --timeout 60 --json build/bench/search-comparison.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: attack-optimization-evidence
+          path: build/bench/
+          if-no-files-found: warn
