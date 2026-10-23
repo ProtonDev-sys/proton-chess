@@ -1,0 +1,380 @@
+name: Generate Stockfish-18 residual evaluator
+
+on:
+  push:
+    branches: [agent/teacher-residual-psqt]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: ${{ !contains(github.event.head_commit.message, '[teacher-generated]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: proton
+      - uses: actions/checkout@v7
+        with:
+          repository: official-stockfish/Stockfish
+          ref: sf_18
+          path: stockfish
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install deterministic training dependencies
+        run: python -m pip install chess==1.11.2 numpy==2.3.2
+      - name: Build teacher and baseline evaluator
+        run: |
+          cmake -S proton -B proton/build-teacher -DCMAKE_BUILD_TYPE=Release -DPROTON_BUILD_TESTS=OFF
+          cmake --build proton/build-teacher --parallel 2
+          make -C stockfish/src -j2 profile-build ARCH=x86-64
+          cat > proton/build-teacher/eval_dump.cpp <<'CPP'
+          #include <iostream>
+          #include <string>
+          #include "engine/eval.h"
+          #include "engine/position.h"
+          int main() {
+              proton::EngineOptions options;
+              options.use_book = false;
+              options.human_style = false;
+              options.uci_limit_strength = false;
+              proton::Evaluator evaluator;
+              evaluator.set_options(options);
+              std::string fen;
+              while (std::getline(std::cin, fen)) {
+                  if (fen.empty()) continue;
+                  proton::Position pos;
+                  if (!pos.set_fen(fen)) { std::cout << "ERR\n"; continue; }
+                  int score = evaluator.evaluate(pos);
+                  if (pos.side_to_move() == proton::Black) score = -score;
+                  std::cout << score << '\n';
+              }
+          }
+          CPP
+          g++ -std=c++20 -O3 -DNDEBUG -Iproton/src \
+            proton/build-teacher/eval_dump.cpp proton/build-teacher/libproton_engine.a \
+            -pthread -o proton/build-teacher/eval_dump
+      - name: Generate positions, collect labels, and fit residual
+        working-directory: proton
+        run: |
+          cat > build-teacher/train.py <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import random
+          import re
+          import subprocess
+          from pathlib import Path
+          import chess
+          import numpy as np
+
+          root = Path.cwd()
+          rng = random.Random(20260821)
+          opening_lines = [line.strip() for line in
+              (root / 'openings/uho_lichess_4852_v1_200.epd').read_text().splitlines()
+              if line.strip()]
+          bases = []
+          for line in opening_lines:
+              board = chess.Board()
+              try:
+                  board.set_epd(line)
+              except Exception:
+                  board = chess.Board(' '.join(line.split()[:6]))
+              bases.append(board)
+
+          seen = set()
+          positions = []
+          def add(board: chess.Board) -> None:
+              if board.is_game_over(claim_draw=True):
+                  return
+              fen = board.fen(en_passant='fen')
+              key = ' '.join(fen.split()[:4])
+              if key not in seen:
+                  seen.add(key)
+                  positions.append(fen)
+
+          for base in bases:
+              add(base)
+              for game in range(8):
+                  board = base.copy(stack=False)
+                  for ply in range(rng.randint(28, 76)):
+                      if board.is_game_over(claim_draw=True):
+                          break
+                      moves = list(board.legal_moves)
+                      weights = []
+                      for move in moves:
+                          weight = 1.0
+                          if board.is_capture(move): weight += 1.8
+                          if move.promotion: weight += 3.0
+                          if board.gives_check(move): weight += 1.0
+                          if board.is_castling(move): weight += 1.2
+                          if chess.square_file(move.to_square) in (2, 3, 4, 5):
+                              weight += 0.25
+                          weights.append(weight)
+                      board.push(rng.choices(moves, weights=weights, k=1)[0])
+                      if ply >= 2 and (ply % 3 == game % 3 or rng.random() < 0.12):
+                          add(board)
+                      if len(positions) >= 12000:
+                          break
+                  if len(positions) >= 12000:
+                      break
+              if len(positions) >= 12000:
+                  break
+          rng.shuffle(positions)
+          positions = positions[:12000]
+          Path('build-teacher/positions.fen').write_text('\n'.join(positions) + '\n')
+
+          proton = subprocess.Popen(
+              ['build-teacher/eval_dump'], stdin=subprocess.PIPE,
+              stdout=subprocess.PIPE, text=True, bufsize=1)
+          assert proton.stdin and proton.stdout
+          for fen in positions:
+              proton.stdin.write(fen + '\n')
+          proton.stdin.close()
+          proton_scores = []
+          for _ in positions:
+              value = proton.stdout.readline().strip()
+              proton_scores.append(None if value in ('', 'ERR') else int(value))
+          if proton.wait() != 0:
+              raise SystemExit('Proton static evaluator failed')
+
+          teacher = subprocess.Popen(
+              ['../stockfish/src/stockfish'], stdin=subprocess.PIPE,
+              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+              text=True, bufsize=1)
+          assert teacher.stdin and teacher.stdout
+          def send(command: str) -> None:
+              teacher.stdin.write(command + '\n')
+              teacher.stdin.flush()
+          def wait_for(token: str) -> None:
+              while True:
+                  line = teacher.stdout.readline()
+                  if not line:
+                      raise RuntimeError('Stockfish terminated')
+                  if token in line:
+                      return
+          send('uci'); wait_for('uciok')
+          send('setoption name Threads value 1')
+          send('setoption name Hash value 16')
+          send('isready'); wait_for('readyok')
+          final_pattern = re.compile(
+              r'Final evaluation:\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))')
+          rows = []
+          for fen, proton_score in zip(positions, proton_scores):
+              if proton_score is None:
+                  continue
+              send('position fen ' + fen)
+              send('eval')
+              while True:
+                  line = teacher.stdout.readline()
+                  if not line:
+                      raise RuntimeError('Stockfish terminated during eval')
+                  match = final_pattern.search(line)
+                  if match:
+                      teacher_cp = max(-1800, min(1800,
+                          round(float(match.group(1)) * 100)))
+                      rows.append((fen, proton_score, teacher_cp))
+                      break
+          send('quit')
+          teacher.wait(timeout=10)
+
+          phase_value = {
+              chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 1,
+              chess.ROOK: 2, chess.QUEEN: 4, chess.KING: 0,
+          }
+          psqt_feature_count = 6 * 32
+          feature_count = psqt_feature_count * 2 + 3
+          X = np.zeros((len(rows), feature_count), dtype=np.float64)
+          y = np.empty(len(rows), dtype=np.float64)
+          train_indices = []
+          validation_indices = []
+          for index, (fen, proton_score, teacher_cp) in enumerate(rows):
+              board = chess.Board(fen)
+              phase = min(24, sum(
+                  len(board.pieces(piece_type, color)) * phase_value[piece_type]
+                  for piece_type in range(1, 7)
+                  for color in (chess.WHITE, chess.BLACK)))
+              mg_weight = phase / 24.0
+              eg_weight = 1.0 - mg_weight
+              for square, piece in board.piece_map().items():
+                  piece_index = piece.piece_type - 1
+                  relative = square if piece.color == chess.WHITE \
+                      else chess.square_mirror(square)
+                  file_index = min(chess.square_file(relative),
+                                   7 - chess.square_file(relative))
+                  rank_index = chess.square_rank(relative)
+                  feature = piece_index * 32 + rank_index * 4 + file_index
+                  sign = 1.0 if piece.color == chess.WHITE else -1.0
+                  X[index, feature] += sign * mg_weight
+                  X[index, psqt_feature_count + feature] += sign * eg_weight
+              X[index, psqt_feature_count * 2] = \
+                  1.0 if board.turn == chess.WHITE else -1.0
+              bishop_pair = (
+                  int(len(board.pieces(chess.BISHOP, chess.WHITE)) >= 2) -
+                  int(len(board.pieces(chess.BISHOP, chess.BLACK)) >= 2))
+              X[index, psqt_feature_count * 2 + 1] = bishop_pair * mg_weight
+              X[index, psqt_feature_count * 2 + 2] = bishop_pair * eg_weight
+              y[index] = teacher_cp - proton_score
+              digest = hashlib.blake2b(
+                  ' '.join(fen.split()[:4]).encode(), digest_size=8).digest()
+              target = validation_indices if int.from_bytes(digest, 'little') % 5 == 0 \
+                  else train_indices
+              target.append(index)
+
+          train = np.asarray(train_indices)
+          validation = np.asarray(validation_indices)
+          best = None
+          for regularization in (10, 30, 100, 300, 1000, 3000, 10000):
+              train_X = X[train]
+              train_y = np.clip(y[train], -1000, 1000)
+              matrix = train_X.T @ train_X + regularization * np.eye(feature_count)
+              coefficients = np.linalg.solve(matrix, train_X.T @ train_y)
+              coefficients[:2 * psqt_feature_count] = np.clip(
+                  coefficients[:2 * psqt_feature_count], -120, 120)
+              coefficients[2 * psqt_feature_count] = np.clip(
+                  coefficients[2 * psqt_feature_count], -30, 30)
+              coefficients[2 * psqt_feature_count + 1:] = np.clip(
+                  coefficients[2 * psqt_feature_count + 1:], -80, 80)
+              rounded = np.rint(coefficients * 0.25).astype(np.int32)
+              prediction = X[validation] @ rounded
+              rmse = float(np.sqrt(np.mean((y[validation] - prediction) ** 2)))
+              mae = float(np.mean(np.abs(y[validation] - prediction)))
+              if best is None or rmse < best[0]:
+                  best = (rmse, mae, regularization, rounded)
+
+          adjusted_rmse, adjusted_mae, regularization, coefficients = best
+          baseline_rmse = float(np.sqrt(np.mean(y[validation] ** 2)))
+          baseline_mae = float(np.mean(np.abs(y[validation])))
+          mg = np.zeros((6, 64), dtype=np.int32)
+          eg = np.zeros((6, 64), dtype=np.int32)
+          for piece_index in range(6):
+              for square in range(64):
+                  file_index = min(chess.square_file(square),
+                                   7 - chess.square_file(square))
+                  rank_index = chess.square_rank(square)
+                  feature = piece_index * 32 + rank_index * 4 + file_index
+                  mg[piece_index, square] = coefficients[feature]
+                  eg[piece_index, square] = coefficients[
+                      psqt_feature_count + feature]
+
+          header = root / 'src/engine/trained_psqt.h'
+          with header.open('w') as output:
+              output.write('#pragma once\n\n#include <array>\n\n')
+              output.write('namespace proton::trained_eval {\n')
+              output.write('inline constexpr std::array<std::array<int, 64>, 6> Mg = {{\n')
+              for row in mg:
+                  output.write('    {' + ', '.join(map(str, row)) + '},\n')
+              output.write('}};\n')
+              output.write('inline constexpr std::array<std::array<int, 64>, 6> Eg = {{\n')
+              for row in eg:
+                  output.write('    {' + ', '.join(map(str, row)) + '},\n')
+              output.write('}};\n')
+              output.write(f'inline constexpr int Tempo = '
+                           f'{int(coefficients[2 * psqt_feature_count])};\n')
+              output.write(f'inline constexpr int BishopPairMg = '
+                           f'{int(coefficients[2 * psqt_feature_count + 1])};\n')
+              output.write(f'inline constexpr int BishopPairEg = '
+                           f'{int(coefficients[2 * psqt_feature_count + 2])};\n')
+              output.write('}\n')
+
+          metadata = {
+              'schema_version': 1,
+              'teacher': 'official-stockfish/Stockfish sf_18 static NNUE eval',
+              'seed': 20260821,
+              'opening_suite': 'openings/uho_lichess_4852_v1_200.epd',
+              'positions': len(rows),
+              'training_positions': int(len(train)),
+              'validation_positions': int(len(validation)),
+              'horizontal_symmetry': True,
+              'blend_percent': 25,
+              'ridge_lambda': int(regularization),
+              'baseline_rmse_cp': baseline_rmse,
+              'candidate_rmse_cp': adjusted_rmse,
+              'baseline_mae_cp': baseline_mae,
+              'candidate_mae_cp': adjusted_mae,
+              'positions_sha256': hashlib.sha256(
+                  ('\n'.join(positions) + '\n').encode()).hexdigest(),
+              'labels_sha256': hashlib.sha256(
+                  ''.join(f'{p}\t{s}\t{f}\n' for f, p, s in rows).encode()).hexdigest(),
+          }
+          (root / 'training').mkdir(exist_ok=True)
+          (root / 'training/residual_psqt_v1.json').write_text(
+              json.dumps(metadata, indent=2) + '\n')
+          Path('build-teacher/metadata.json').write_text(
+              json.dumps(metadata, indent=2) + '\n')
+          PY
+          python build-teacher/train.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/engine/eval.cpp')
+          text = path.read_text()
+          replacements = [
+              ('#include "attacks.h"\n',
+               '#include "attacks.h"\n#include "trained_psqt.h"\n'),
+              ('            entry.mg += sign * MgValue[Pawn];\n'
+               '            entry.eg += sign * EgValue[Pawn];\n',
+               '            const int relative_square =\n'
+               '                color == White ? square : square ^ 56;\n'
+               '            entry.mg += sign *\n'
+               '                (MgValue[Pawn] + trained_eval::Mg[Pawn][relative_square]);\n'
+               '            entry.eg += sign *\n'
+               '                (EgValue[Pawn] + trained_eval::Eg[Pawn][relative_square]);\n'),
+              ('                    int mg_square = PieceSquareScores[color][Type][square].mg;\n'
+               '                    int eg_square = PieceSquareScores[color][Type][square].eg;\n',
+               '                    const int relative_square =\n'
+               '                        color == White ? square : square ^ 56;\n'
+               '                    int mg_square = PieceSquareScores[color][Type][square].mg +\n'
+               '                                    trained_eval::Mg[Type][relative_square];\n'
+               '                    int eg_square = PieceSquareScores[color][Type][square].eg +\n'
+               '                                    trained_eval::Eg[Type][relative_square];\n'),
+              ('        if (bishops[color] >= 2) {\n'
+               '            mg += sign * 24;\n'
+               '            eg += sign * 34;\n'
+               '        }\n',
+               '        if (bishops[color] >= 2) {\n'
+               '            mg += sign * (24 + trained_eval::BishopPairMg);\n'
+               '            eg += sign * (34 + trained_eval::BishopPairEg);\n'
+               '        }\n'),
+              ('    const int score = (mg * phase + eg * (MaxPhase - phase)) / MaxPhase;\n'
+               '    return position.side_to_move() == White ? score : -score;\n',
+               '    int score = (mg * phase + eg * (MaxPhase - phase)) / MaxPhase;\n'
+               '    score += position.side_to_move() == White\n'
+               '        ? trained_eval::Tempo\n'
+               '        : -trained_eval::Tempo;\n'
+               '    return position.side_to_move() == White ? score : -score;\n'),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'patch occurrence count {text.count(old)} for {old[:40]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+      - name: Rebuild and run covered invariants
+        working-directory: proton
+        run: |
+          rm -rf build
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/upload-artifact@v6
+        with:
+          name: teacher-residual-training-${{ github.sha }}
+          path: |
+            proton/build-teacher/metadata.json
+            proton/build-teacher/positions.fen
+            proton/training/residual_psqt_v1.json
+            proton/src/engine/trained_psqt.h
+          retention-days: 7
+      - name: Commit generated evaluator and remove generator workflow
+        working-directory: proton
+        run: |
+          git config user.name "Proton engine automation"
+          git config user.email "72932384+ProtonDev-sys@users.noreply.github.com"
+          git rm .github/workflows/generate-teacher-residual.yml
+          git add src/engine/eval.cpp src/engine/trained_psqt.h training/residual_psqt_v1.json
+          git commit -m "Add a Stockfish-18-trained tapered residual evaluator [teacher-generated]"
+          git push
